@@ -22,9 +22,9 @@ Each file records the commit it was generated from in `generated_from.commit`.
 
 | File | What it pins down | Cases |
 |---|---|---|
-| `template.json` | Prompt rendering: the Liquid subset PromptOn allows | 72 render, 10 lint, 5 detected-variables |
+| `template.json` | Prompt rendering: the Liquid subset PromptOn allows | 72 render (4 non-normative), 10 lint, 5 detected-variables |
 | `resolve.json` | Snapshot + use case (+ prompt name) → model, params, prompt version, rendered messages | 3 snapshots, 15 cases |
-| `truncation.json` | The payload policy the SDK applies to a monitoring log before sending it | 18 cases + 5 sampling buckets |
+| `truncation.json` | The payload policy the SDK applies to a monitoring log before sending it | 19 cases + 5 sampling buckets |
 | `stop_kind.json` | Provider `finish_reason` → PromptOn `stop_kind` | 22 cases |
 | `generation_record.json` | Complete monitoring-log records and the batch envelope | 5 records |
 
@@ -74,6 +74,11 @@ These are golden shapes rather than executable cases: `records[].record` is a co
 log as `POST /api/v1/generations` accepts it, and `batch_envelope.request` wraps all of them in one
 batch. Use them to check your record builder's output shape and your batch envelope. `field_rules`
 lists what the server validates.
+
+**A generation id must be a UUIDv7, not a UUIDv4.** The request-level validation accepts any UUID
+string, but the column is a UUIDv7 type and a v4 id fails on write — the record comes back in
+`rejected` with `record could not be stored`, which does not say why. Generate 48 bits of unix
+milliseconds, the version nibble 7, then random bits.
 
 **`started_at` in these records is a fixed timestamp.** The server rejects a record whose
 `started_at` is more than 5 minutes in the future or more than 7 days in the past, so replace it

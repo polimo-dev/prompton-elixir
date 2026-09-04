@@ -288,7 +288,7 @@
   },
   "field_rules": {
     "error.kind": "http_4xx | http_5xx | rate_limited | timeout | transport | parse | app",
-    "id": "UUID string; the SDK issues a UUIDv7 so records sort by time",
+    "id": "MUST be a UUIDv7 (version nibble 7). Request validation accepts any UUID string, but the database column is a UUIDv7 type and a v4 id fails on write: the record comes back in `rejected` with \"record could not be stored\". Generate v7 (48-bit unix milliseconds, then random) so records also sort by time.",
     "jsonb_safety": "every string (including keys inside context/metadata/params) must be valid UTF-8 with no NUL byte, and every integer must fit in 64 bits, or the record is rejected",
     "kind": "chat | text | embedding (defaults to chat)",
     "model": "the provider model string that was actually requested",
@@ -311,7 +311,7 @@
   },
   "format_version": 1,
   "generated_from": {
-    "commit": "dd6df7765fb5e139feaf92d4ac82933b05c7c217",
+    "commit": "5f04e7e4cfb66d379b2f00eef4cd3fce4ba26a61",
     "language": "elixir",
     "repo": "https://github.com/polimo-dev/prompton-elixir",
     "sdk": "prompton_sdk",

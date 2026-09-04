@@ -159,6 +159,7 @@ defmodule PromptOnSDK.ConformanceTest do
       end
 
       assert r["id"] =~ @uuid, "#{name}: id must be a UUID"
+      assert String.at(r["id"], 14) == "7", "#{name}: id must be a UUIDv7, not a v4"
       assert r["status"] in ~w(ok error), "#{name}: status"
       assert {:ok, _dt, _offset} = DateTime.from_iso8601(r["started_at"]), "#{name}: started_at"
       assert byte_size(r["use_case"]) <= 512, "#{name}: use_case"

@@ -465,7 +465,7 @@
   },
   "format_version": 1,
   "generated_from": {
-    "commit": "dd6df7765fb5e139feaf92d4ac82933b05c7c217",
+    "commit": "5f04e7e4cfb66d379b2f00eef4cd3fce4ba26a61",
     "language": "elixir",
     "repo": "https://github.com/polimo-dev/prompton-elixir",
     "sdk": "prompton_sdk",
@@ -475,6 +475,11 @@
     "effective_params": "use_case.default_params <- deployment.params (shallow, later wins)",
     "effective_provider_options": "model.provider_options <- deployment.provider_options (shallow, later wins)",
     "null_values": "an override value of null is kept as null, not deleted"
+  },
+  "snapshot_notes": {
+    "degraded": "Synthetic. The deployment points at a prompt version id and a model id the snapshot does not contain, to pin down the warning path. A healthy server never emits this.",
+    "production": "The everyday shape: three deployed use cases (chat with two prompt names, text, embedding) plus one use case that has never been deployed. Field for field what GET /snapshot returns.",
+    "staging": "The same project in another environment: one use case, a different revision, different params and only the default prompt pinned."
   },
   "snapshots": {
     "degraded": {
@@ -491,8 +496,7 @@
               "OpenAI"
             ]
           },
-          "revision": 1,
-          "use_case_key": "greeting"
+          "revision": 1
         }
       },
       "environment": "production",
@@ -507,8 +511,14 @@
           },
           "id": "0198f2a1-0000-7000-8000-00000000c001",
           "input_schema": [],
-          "key": "greeting",
-          "kind": "chat"
+          "kind": "chat",
+          "payload_policy": {
+            "encrypt": false,
+            "max_bytes": 262144,
+            "mode": "full",
+            "retention_days": 30,
+            "sample_rate": 1.0
+          }
         }
       }
     },
@@ -522,8 +532,7 @@
           },
           "prompt_pins": {},
           "provider_options": {},
-          "revision": 2,
-          "use_case_key": "embed"
+          "revision": 2
         },
         "greeting": {
           "id": "0198f2a1-0000-7000-8000-00000000d001",
@@ -539,8 +548,7 @@
             "allow_fallbacks": true,
             "sort": null
           },
-          "revision": 3,
-          "use_case_key": "greeting"
+          "revision": 3
         },
         "summarize": {
           "id": "0198f2a1-0000-7000-8000-00000000d002",
@@ -550,18 +558,16 @@
             "default": "0198f2a1-0000-7000-8000-00000000a003"
           },
           "provider_options": {},
-          "revision": 1,
-          "use_case_key": "summarize"
+          "revision": 1
         }
       },
       "environment": "production",
       "models": {
         "0198f2a1-0000-7000-8000-00000000e001": {
           "capabilities": [
-            "chat",
-            "tools"
+            "tools",
+            "streaming"
           ],
-          "context_length": 128000,
           "display_name": "GPT-4o mini",
           "id": "0198f2a1-0000-7000-8000-00000000e001",
           "metadata": {},
@@ -576,10 +582,7 @@
           "status": "active"
         },
         "0198f2a1-0000-7000-8000-00000000e002": {
-          "capabilities": [
-            "embedding"
-          ],
-          "context_length": 8191,
+          "capabilities": [],
           "display_name": "text-embedding-3-small",
           "id": "0198f2a1-0000-7000-8000-00000000e002",
           "metadata": {},
@@ -605,7 +608,8 @@
             }
           ],
           "number": 2,
-          "prompt_id": "0198f2a1-0000-7000-8000-00000000b001"
+          "prompt_id": "0198f2a1-0000-7000-8000-00000000b001",
+          "text_template": null
         },
         "0198f2a1-0000-7000-8000-00000000a002": {
           "engine": "liquid",
@@ -621,11 +625,13 @@
             }
           ],
           "number": 1,
-          "prompt_id": "0198f2a1-0000-7000-8000-00000000b001"
+          "prompt_id": "0198f2a1-0000-7000-8000-00000000b001",
+          "text_template": null
         },
         "0198f2a1-0000-7000-8000-00000000a003": {
           "engine": "liquid",
           "id": "0198f2a1-0000-7000-8000-00000000a003",
+          "messages": [],
           "number": 4,
           "prompt_id": "0198f2a1-0000-7000-8000-00000000b002",
           "text_template": "Summarize the following notes in one paragraph.\n{% for item in items %}- {{ item }}\n{% endfor %}"
@@ -637,9 +643,14 @@
           "default_params": {},
           "id": "0198f2a1-0000-7000-8000-00000000c004",
           "input_schema": [],
-          "key": "draft",
           "kind": "chat",
-          "payload_policy": null
+          "payload_policy": {
+            "encrypt": false,
+            "max_bytes": 262144,
+            "mode": "full",
+            "retention_days": 30,
+            "sample_rate": 1.0
+          }
         },
         "embed": {
           "default_params": {},
@@ -651,11 +662,12 @@
               "type": "string"
             }
           ],
-          "key": "embed",
           "kind": "embedding",
           "payload_policy": {
+            "encrypt": false,
             "max_bytes": 262144,
             "mode": "hash",
+            "retention_days": 30,
             "sample_rate": 1.0
           }
         },
@@ -667,13 +679,11 @@
           "id": "0198f2a1-0000-7000-8000-00000000c001",
           "input_schema": [
             {
-              "example": "Ada",
               "name": "name",
               "required": true,
               "type": "string"
             }
           ],
-          "key": "greeting",
           "kind": "chat",
           "payload_policy": {
             "encrypt": false,
@@ -695,9 +705,14 @@
               "type": "list"
             }
           ],
-          "key": "summarize",
           "kind": "text",
-          "payload_policy": null
+          "payload_policy": {
+            "encrypt": false,
+            "max_bytes": 262144,
+            "mode": "full",
+            "retention_days": 30,
+            "sample_rate": 1.0
+          }
         }
       }
     },
@@ -714,15 +729,15 @@
             "default": "0198f2a1-0000-7000-8000-00000000a004"
           },
           "provider_options": {},
-          "revision": 7,
-          "use_case_key": "greeting"
+          "revision": 7
         }
       },
       "environment": "staging",
       "models": {
         "0198f2a1-0000-7000-8000-00000000e001": {
           "capabilities": [
-            "chat"
+            "tools",
+            "streaming"
           ],
           "display_name": "GPT-4o mini",
           "id": "0198f2a1-0000-7000-8000-00000000e001",
@@ -734,7 +749,8 @@
             "only": [
               "OpenAI"
             ]
-          }
+          },
+          "status": "active"
         }
       },
       "project": "sdkfixture",
@@ -753,7 +769,8 @@
             }
           ],
           "number": 3,
-          "prompt_id": "0198f2a1-0000-7000-8000-00000000b001"
+          "prompt_id": "0198f2a1-0000-7000-8000-00000000b001",
+          "text_template": null
         }
       },
       "schema_version": 3,
@@ -771,11 +788,12 @@
               "type": "string"
             }
           ],
-          "key": "greeting",
           "kind": "chat",
           "payload_policy": {
+            "encrypt": false,
             "max_bytes": 65536,
             "mode": "full",
+            "retention_days": 30,
             "sample_rate": 0.5
           }
         }

@@ -440,6 +440,14 @@ defmodule GenConformance do
         "missing_variable" =>
           "resolution succeeded but rendering needed a variable that was absent"
       },
+      "snapshot_notes" => %{
+        "production" =>
+          "The everyday shape: three deployed use cases (chat with two prompt names, text, embedding) plus one use case that has never been deployed. Field for field what GET /snapshot returns.",
+        "staging" =>
+          "The same project in another environment: one use case, a different revision, different params and only the default prompt pinned.",
+        "degraded" =>
+          "Synthetic. The deployment points at a prompt version id and a model id the snapshot does not contain, to pin down the warning path. A healthy server never emits this."
+      },
       "snapshots" => snapshots,
       "cases" => cases
     }
@@ -536,6 +544,16 @@ defmodule GenConformance do
     }
   end
 
+  defp payload_policy(mode, sample_rate) do
+    %{
+      "mode" => mode,
+      "sample_rate" => sample_rate,
+      "max_bytes" => 262_144,
+      "retention_days" => 30,
+      "encrypt" => false
+    }
+  end
+
   defp production_snapshot do
     %{
       "schema_version" => 3,
@@ -544,49 +562,36 @@ defmodule GenConformance do
       "use_cases" => %{
         "greeting" => %{
           "id" => @uc_greeting,
-          "key" => "greeting",
           "kind" => "chat",
-          "input_schema" => [
-            %{"name" => "name", "type" => "string", "required" => true, "example" => "Ada"}
-          ],
+          "input_schema" => [%{"name" => "name", "type" => "string", "required" => true}],
           "default_params" => %{"temperature" => 0.7, "max_tokens" => 512},
-          "payload_policy" => %{
-            "mode" => "full",
-            "sample_rate" => 1.0,
-            "max_bytes" => 262_144,
-            "retention_days" => 30,
-            "encrypt" => false
-          }
+          "payload_policy" => payload_policy("full", 1.0)
         },
         "summarize" => %{
           "id" => @uc_summarize,
-          "key" => "summarize",
           "kind" => "text",
           "input_schema" => [%{"name" => "items", "type" => "list", "required" => true}],
           "default_params" => %{"temperature" => 0.0},
-          "payload_policy" => nil
+          "payload_policy" => payload_policy("full", 1.0)
         },
         "embed" => %{
           "id" => @uc_embed,
-          "key" => "embed",
           "kind" => "embedding",
           "input_schema" => [%{"name" => "text", "type" => "string", "required" => true}],
           "default_params" => %{},
-          "payload_policy" => %{"mode" => "hash", "sample_rate" => 1.0, "max_bytes" => 262_144}
+          "payload_policy" => payload_policy("hash", 1.0)
         },
         "draft" => %{
           "id" => @uc_draft,
-          "key" => "draft",
           "kind" => "chat",
           "input_schema" => [],
           "default_params" => %{},
-          "payload_policy" => nil
+          "payload_policy" => payload_policy("full", 1.0)
         }
       },
       "deployments" => %{
         "greeting" => %{
           "id" => @dep_greeting_prod,
-          "use_case_key" => "greeting",
           "revision" => 3,
           "model_id" => @model_chat,
           "params" => %{"temperature" => 0.2},
@@ -595,7 +600,6 @@ defmodule GenConformance do
         },
         "summarize" => %{
           "id" => @dep_summarize_prod,
-          "use_case_key" => "summarize",
           "revision" => 1,
           "model_id" => @model_chat,
           "params" => %{},
@@ -604,7 +608,6 @@ defmodule GenConformance do
         },
         "embed" => %{
           "id" => @dep_embed_prod,
-          "use_case_key" => "embed",
           "revision" => 2,
           "model_id" => @model_embed,
           "params" => %{"dimensions" => 256},
@@ -621,7 +624,8 @@ defmodule GenConformance do
           "messages" => [
             %{"role" => "system", "content" => "You are a friendly greeter. Answer in one line."},
             %{"role" => "user", "content" => "Say hello to {{ name }}."}
-          ]
+          ],
+          "text_template" => nil
         },
         @pv_greeting_ko => %{
           "id" => @pv_greeting_ko,
@@ -631,13 +635,15 @@ defmodule GenConformance do
           "messages" => [
             %{"role" => "system", "content" => "너는 친절한 인사 도우미다. 한 줄로 답한다."},
             %{"role" => "user", "content" => "{{ name }}님에게 인사해줘."}
-          ]
+          ],
+          "text_template" => nil
         },
         @pv_summarize => %{
           "id" => @pv_summarize,
           "prompt_id" => @prompt_summarize,
           "number" => 4,
           "engine" => "liquid",
+          "messages" => [],
           "text_template" =>
             "Summarize the following notes in one paragraph.\n{% for item in items %}- {{ item }}\n{% endfor %}"
         }
@@ -649,8 +655,7 @@ defmodule GenConformance do
           "model_id" => "openai/gpt-4o-mini",
           "display_name" => "GPT-4o mini",
           "provider_options" => %{"only" => ["OpenAI"], "allow_fallbacks" => false},
-          "capabilities" => ["chat", "tools"],
-          "context_length" => 128_000,
+          "capabilities" => ["tools", "streaming"],
           "status" => "active",
           "metadata" => %{}
         },
@@ -660,8 +665,7 @@ defmodule GenConformance do
           "model_id" => "openai/text-embedding-3-small",
           "display_name" => "text-embedding-3-small",
           "provider_options" => %{},
-          "capabilities" => ["embedding"],
-          "context_length" => 8191,
+          "capabilities" => [],
           "status" => "active",
           "metadata" => %{}
         }
@@ -677,17 +681,15 @@ defmodule GenConformance do
       "use_cases" => %{
         "greeting" => %{
           "id" => @uc_greeting,
-          "key" => "greeting",
           "kind" => "chat",
           "input_schema" => [%{"name" => "name", "type" => "string", "required" => true}],
           "default_params" => %{"temperature" => 0.7, "max_tokens" => 512},
-          "payload_policy" => %{"mode" => "full", "sample_rate" => 0.5, "max_bytes" => 65_536}
+          "payload_policy" => Map.put(payload_policy("full", 0.5), "max_bytes", 65_536)
         }
       },
       "deployments" => %{
         "greeting" => %{
           "id" => @dep_greeting_stg,
-          "use_case_key" => "greeting",
           "revision" => 7,
           "model_id" => @model_chat,
           "params" => %{"temperature" => 0.9, "top_p" => 0.8},
@@ -704,7 +706,8 @@ defmodule GenConformance do
           "messages" => [
             %{"role" => "system", "content" => "You are a greeter (staging build)."},
             %{"role" => "user", "content" => "Greet {{ name }}."}
-          ]
+          ],
+          "text_template" => nil
         }
       },
       "models" => %{
@@ -714,7 +717,8 @@ defmodule GenConformance do
           "model_id" => "openai/gpt-4o-mini",
           "display_name" => "GPT-4o mini",
           "provider_options" => %{"only" => ["OpenAI"], "allow_fallbacks" => false},
-          "capabilities" => ["chat"],
+          "capabilities" => ["tools", "streaming"],
+          "status" => "active",
           "metadata" => %{}
         }
       }
@@ -729,16 +733,15 @@ defmodule GenConformance do
       "use_cases" => %{
         "greeting" => %{
           "id" => @uc_greeting,
-          "key" => "greeting",
           "kind" => "chat",
           "input_schema" => [],
-          "default_params" => %{"temperature" => 0.4}
+          "default_params" => %{"temperature" => 0.4},
+          "payload_policy" => payload_policy("full", 1.0)
         }
       },
       "deployments" => %{
         "greeting" => %{
           "id" => @dep_broken,
-          "use_case_key" => "greeting",
           "revision" => 1,
           "model_id" => @model_absent,
           "params" => %{},
@@ -1402,7 +1405,8 @@ defmodule GenConformance do
       },
       "field_rules" => %{
         "required" => ["id", "use_case", "model", "status", "started_at"],
-        "id" => "UUID string; the SDK issues a UUIDv7 so records sort by time",
+        "id" =>
+          "MUST be a UUIDv7 (version nibble 7). Request validation accepts any UUID string, but the database column is a UUIDv7 type and a v4 id fails on write: the record comes back in `rejected` with \"record could not be stored\". Generate v7 (48-bit unix milliseconds, then random) so records also sort by time.",
         "use_case" => "the use case key, at most 512 bytes",
         "model" => "the provider model string that was actually requested",
         "status" => "ok | error",
