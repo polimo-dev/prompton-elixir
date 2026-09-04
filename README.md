@@ -87,22 +87,22 @@ The disk cache and bundle are refused with a warning when their `environment` di
 `environment` (a `staging` app must not boot on a `production` bundle). `PromptOnSDK.snapshot_info/0` reports
 `%{etag, last_modified, source, fetched_at, stale?, age_seconds}`; `PromptOnSDK.refresh/0` re-fetches synchronously.
 
-## Usage (HeyDiary-style Oban worker)
+## Usage (Oban worker)
 
 ```elixir
-defmodule MyApp.Workers.DiaryGeneration do
+defmodule MyApp.Workers.SupportReply do
   use Oban.Worker
 
   @impl true
-  def perform(%Oban.Job{id: job_id, attempt: attempt, args: %{"user_id" => user_id} = args}) do
-    with {:ok, r} <- PromptOnSDK.resolve("diary_generation", prompt: args["language"] || "default"),
-         vars = %{transcriptions: args["transcriptions"], mode: args["mode"]},
+  def perform(%Oban.Job{id: job_id, attempt: attempt, args: %{"customer_ref" => customer_ref} = args}) do
+    with {:ok, r} <- PromptOnSDK.resolve("support_reply", prompt: args["language"] || "default"),
+         vars = %{question: args["question"], plan: args["plan"]},
          {:ok, msgs} <- PromptOnSDK.render(r, vars) do
       PromptOnSDK.with_generation(
         r,
-        %{end_user_ref: user_id, trace_id: "oban:#{job_id}", sequence: attempt,
+        %{end_user_ref: customer_ref, trace_id: "ticket:#{args["ticket_id"]}", sequence: attempt,
           input_messages: msgs, variables: vars, context: %{language: args["language"], plan: args["plan"]},
-          metadata: %{job_id: job_id, attempt: attempt}},
+          metadata: %{ticket_id: args["ticket_id"], job_id: job_id, attempt: attempt}},
         fn ->
           body = PromptOnSDK.OpenRouter.request_body(r, msgs)      # model/provider.only/params + usage.include
 
@@ -110,8 +110,8 @@ defmodule MyApp.Workers.DiaryGeneration do
             {:ok, %{status: 200, body: resp}} ->
               outcome = PromptOnSDK.OpenRouter.outcome(resp)       # content, tokens, cost (BYOK-aware), stop_kind
 
-              case parse_diary(outcome.content) do
-                {:ok, diary} -> {:ok, %{outcome | result: diary}}
+              case parse_reply(outcome.content) do
+                {:ok, reply} -> {:ok, %{outcome | result: reply}}
                 {:error, e}  -> {:error, %{kind: :parse, message: e}, outcome}   # 3-tuple keeps usage/output
               end
 
@@ -121,7 +121,7 @@ defmodule MyApp.Workers.DiaryGeneration do
         end
       )
       |> case do
-        {:ok, %{result: diary}} -> save(diary)
+        {:ok, %{result: reply}} -> send_reply(customer_ref, reply)
         {:error, _} = err -> err
         {:error, _, _} -> {:cancel, :parse}
       end
@@ -156,9 +156,9 @@ prompt name**:
 
 ```json
 "deployments": {
-  "diary_generation": {
+  "support_reply": {
     "id": "…", "revision": 7,
-    "model_id": "…", "params": {"temperature": 0.5}, "provider_options": {"only": ["Anthropic"]},
+    "model_id": "…", "params": {"temperature": 0.3}, "provider_options": {"only": ["OpenAI"]},
     "prompt_pins": {"default": "<prompt version id>", "ko": "<prompt version id>"}
   }
 }
@@ -167,9 +167,9 @@ prompt name**:
 Selection at request time is the prompt name and nothing else:
 
 ```elixir
-{:ok, r} = PromptOnSDK.resolve("diary_generation")                  # pin "default"
-{:ok, r} = PromptOnSDK.resolve("diary_generation", prompt: "ko")    # pin "ko"
-{:ok, names} = PromptOnSDK.prompt_names("diary_generation")         # ["default", "ko"]
+{:ok, r} = PromptOnSDK.resolve("support_reply")                  # pin "default"
+{:ok, r} = PromptOnSDK.resolve("support_reply", prompt: "ko")    # pin "ko"
+{:ok, names} = PromptOnSDK.prompt_names("support_reply")         # ["default", "ko"]
 ```
 
 A name the deployment does not pin is `{:error, :unknown_prompt}` — the SDK never falls back to `"default"`
@@ -223,17 +223,20 @@ config :prompton_sdk, mode: :test        # no HTTP; no supervisor needed
 import PromptOnSDK.Test
 
 setup do
-  PromptOnSDK.Test.stub("diary_generation", %{
-    model: "openai/gpt-5-mini",
-    messages: [%{role: "system", content: "You are a diary writer."}, %{role: "user", content: "{{ text }}"}],
-    params: %{temperature: 0.5}
+  PromptOnSDK.Test.stub("support_reply", %{
+    model: "openai/gpt-4o-mini",
+    messages: [
+      %{role: "system", content: "You are a friendly support agent for Acme. Answer in two or three sentences; if you are not sure, say so and offer to escalate."},
+      %{role: "user", content: "{{ question }}"}
+    ],
+    params: %{temperature: 0.3}
   })
   on_exit(&PromptOnSDK.Test.clear/0)
 end
 
 test "logs a generation" do
-  assert :ok = perform_job(MyApp.Workers.DiaryGeneration, %{...})     # runs in the test process
-  gen = assert_logged(%{"use_case" => "diary_generation", "status" => "ok"})
+  assert :ok = perform_job(MyApp.Workers.SupportReply, %{...})        # runs in the test process
+  gen = assert_logged(%{"use_case" => "support_reply", "status" => "ok"})
   assert gen["usage"]["input_tokens"] == 100
 end
 ```

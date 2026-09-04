@@ -15,7 +15,7 @@ defmodule PromptOnSDK.Resolution do
   | `deployment_id`, `deployment_revision` | The Deployment revision that produced this resolution |
   | `prompt_version_id`, `prompt_version_number`, `engine` | The pinned prompt version (`nil` for `:embedding`). `engine` is `:liquid`/`:raw` |
   | `model_id` | Catalog `Model.id` (UUID) |
-  | `model` | Provider model string (`"anthropic/claude-sonnet-4"`), used in the request body as is |
+  | `model` | Provider model string (`"openai/gpt-4o-mini"`), used in the request body as is |
   | `provider` | `:openrouter`, etc. |
   | `effective_params` | `UseCase.default_params ⊕ Deployment.params` (string keys, shallow merge) |
   | `effective_provider_options` | `Model.provider_options ⊕ Deployment.provider_options` (`nil` values preserved) |

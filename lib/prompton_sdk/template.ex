@@ -49,7 +49,7 @@ defmodule PromptOnSDK.Template do
 
   Strings as is, numbers in Liquid notation (`1.5`), lists as their elements concatenated with no
   separator (same as Liquid), `nil` as `""`. `{{ forloop.index }}` (1-based), `forloop.last`,
-  etc. are available. A golden test guarantees byte equality with HeyDiary's `numbered/1`.
+  etc. are available. A golden test guarantees byte equality with a hand-written numbered list.
 
   ## Variable map
 

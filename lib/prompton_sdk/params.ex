@@ -12,8 +12,8 @@ defmodule PromptOnSDK.Params do
     as a whole.
   * **Keys are normalized to strings**: snapshots use string keys while app code may use atom
     keys, so `%{temperature: 0.7}` and `%{"temperature" => 0.5}` are treated as the same key.
-  * **Explicit `nil` is preserved**: HeyDiary must send OpenRouter `provider.only: null`, so when
-    an override puts `nil`, that key stays with a `nil` value (it is not deleted). The adapter
+  * **Explicit `nil` is preserved**: an app may need to send OpenRouter `provider.only: null`, so
+    when an override puts `nil`, that key stays with a `nil` value (it is not deleted). The adapter
     serializes it as `null`.
   * A `nil` argument is treated as an empty map.
   """

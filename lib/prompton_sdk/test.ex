@@ -4,10 +4,9 @@ defmodule PromptOnSDK.Test do
 
   * There is no HTTP at all: `PromptOnSDK.Snapshot` loads nothing, and `PromptOnSDK.log/1` /
     `feedback/1` send `{:prompton_generation, gen}` / `{:prompton_feedback, map}` to the
-    **calling process** instead of the Buffer. As with HeyDiary's `AIStubs`,
-    `Oban.Testing.perform_job/3` runs in the calling process, so you can `assert_receive`
-    directly. The supervisor (`{PromptOnSDK, []}`) need not be started: the snapshot lives in
-    `:persistent_term`, so no process is required.
+    **calling process** instead of the Buffer. `Oban.Testing.perform_job/3` runs in the calling
+    process too, so you can `assert_receive` directly. The supervisor (`{PromptOnSDK, []}`) need
+    not be started: the snapshot lives in `:persistent_term`, so no process is required.
   * Snapshots are injected with `put_snapshot/1` (map, JSON file, or `%SnapshotData{}`) or
     `stub/2` (a minimal entry for one UseCase).
 
@@ -18,20 +17,24 @@ defmodule PromptOnSDK.Test do
 
       # in a test
       setup do
-        PromptOnSDK.Test.stub("diary_generation", %{model: "openai/gpt-5-mini",
-          messages: [%{role: "system", content: "You are a diary writer."}, %{role: "user", content: "{{ text }}"}],
-          params: %{temperature: 0.5}})
+        PromptOnSDK.Test.stub("support_reply", %{model: "openai/gpt-4o-mini",
+          messages: [
+            %{role: "system", content: "You are a friendly support agent for Acme. Answer in two or three sentences; if you are not sure, say so and offer to escalate."},
+            %{role: "user", content: "{{ question }}"}
+          ],
+          params: %{temperature: 0.3}})
         on_exit(&PromptOnSDK.Test.clear/0)
       end
 
   Named prompts (language branches) are stubbed with `prompt:`:
-  `stub("chat", %{model: ..., prompt: "ko", ...})` corresponds to `resolve("chat", prompt: "ko")`.
-  Calling it several times for the same key with different names accumulates pins.
+  `stub("support_reply", %{model: ..., prompt: "ko", ...})` corresponds to
+  `resolve("support_reply", prompt: "ko")`. Calling it several times for the same key with
+  different names accumulates pins.
 
       test "worker logs a generation" do
-        assert :ok = perform_job(MyWorker, %{...})
+        assert :ok = perform_job(MyApp.Workers.SupportReply, %{...})
         # partial match (map pattern)
-        assert_logged(%{"use_case" => "diary_generation", "status" => "ok"})
+        assert_logged(%{"use_case" => "support_reply", "status" => "ok"})
       end
 
   `stub/2` **accumulates** onto the existing test snapshot (multiple UseCases). `put_snapshot/1`
@@ -198,7 +201,7 @@ defmodule PromptOnSDK.Test do
   process (`assert_receive`). `gen` is a **string-keyed** map in the §6.4 format (after the
   payload policy is applied). Returns the matched gen.
 
-      gen = assert_logged(%{"use_case" => "diary_generation"})
+      gen = assert_logged(%{"use_case" => "support_reply"})
       assert gen["status"] == "ok"
   """
   defmacro assert_logged(pattern, timeout \\ 100) do

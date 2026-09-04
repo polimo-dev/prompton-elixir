@@ -3,8 +3,8 @@ defmodule PromptOnSDK.OpenRouter do
   OpenRouter (OpenAI-compatible chat/completions) adapter: request body assembly plus response →
   outcome extraction (§7.4, §9.5).
 
-  The SDK does **not call the LLM** (§7.1). This module absorbs what HeyDiary's `base_body` /
-  `ApiLogs.effective_cost/1` used to do.
+  The SDK does **not call the LLM** (§7.1). This module only assembles the body you post and
+  reads the response back; the HTTP call stays in your code.
 
   ## `request_body/3`
 
@@ -18,15 +18,14 @@ defmodule PromptOnSDK.OpenRouter do
 
   `overrides` are shallow-merged into the **top-level body** (`"stream" => true`,
   `"tools" => […]`, `"usage" => …`, `"provider" => …`, etc.; nested maps are replaced as a whole).
-  When `provider.only` is `nil`, it is serialized as `null` (HeyDiary contract, see
-  `PromptOnSDK.Params`).
+  When `provider.only` is `nil`, it is serialized as `null` (see `PromptOnSDK.Params`).
 
   ## `outcome/1`
 
   Reads `choices[0].message` and `usage` from the response body (the result of `Jason.decode/1`)
   and builds the outcome map `with_generation/3` understands. The cost is `usage.cost`; **when
-  `usage.is_byok`, it is `usage.cost_details.upstream_inference_cost`** (HeyDiary
-  `effective_cost`). `cost_source` is `:provider` when a cost value is present, otherwise
+  `usage.is_byok`, it is `usage.cost_details.upstream_inference_cost`** (see
+  `effective_cost/2`). `cost_source` is `:provider` when a cost value is present, otherwise
   `:unknown` (the server fills it in from the catalog price).
   """
 
@@ -98,8 +97,8 @@ defmodule PromptOnSDK.OpenRouter do
   end
 
   @doc """
-  HeyDiary `ApiLogs.effective_cost/1`: `cost_details.upstream_inference_cost` for BYOK, otherwise
-  `cost`. `nil` when absent.
+  The cost actually billed: `cost_details.upstream_inference_cost` for BYOK, otherwise `cost`.
+  `nil` when absent.
   """
   @spec effective_cost(map(), boolean()) :: number() | nil
   def effective_cost(usage, is_byok) when is_map(usage) do

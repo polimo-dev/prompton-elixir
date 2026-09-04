@@ -26,13 +26,16 @@ defmodule PromptOnSDK do
       # application.ex
       children = [MyApp.Repo, {PromptOnSDK, []}, Oban, MyAppWeb.Endpoint]
 
-  ## Call flow (HeyDiary style)
+  ## Call flow
 
-      {:ok, r} = PromptOnSDK.resolve("diary_generation", prompt: "ko")
-      {:ok, msgs} = PromptOnSDK.render(r, %{transcriptions: [...], mode: "fresh"})
+      question = "My invoice shows two charges this month."
 
-      PromptOnSDK.with_generation(r, %{end_user_ref: user.id, trace_id: "oban:1", input_messages: msgs,
-                                       variables: %{transcriptions: [...], mode: "fresh"},
+      {:ok, r} = PromptOnSDK.resolve("support_reply", prompt: "ko")
+      {:ok, msgs} = PromptOnSDK.render(r, %{question: question, plan: "pro"})
+
+      PromptOnSDK.with_generation(r, %{end_user_ref: "cust_8f31", trace_id: "ticket:88213",
+                                       input_messages: msgs,
+                                       variables: %{question: question, plan: "pro"},
                                        context: %{language: "ko", plan: "pro"}}, fn ->
         body = PromptOnSDK.OpenRouter.request_body(r, msgs)
         case Req.post(url, json: body) do
@@ -359,8 +362,8 @@ defmodule PromptOnSDK do
   def snapshot_info, do: Snapshot.info()
 
   @doc """
-  Synchronous reload (the counterpart of HeyDiary's Registry.reload). `:live` fetches from the
-  remote; `:offline` reloads from file.
+  Synchronous reload of the snapshot. `:live` fetches from the remote; `:offline` reloads from
+  file.
   """
   @spec refresh() :: :ok | {:error, term()}
   def refresh, do: Snapshot.refresh()
