@@ -46,7 +46,7 @@ defmodule PromptOnSDK.LiveFixtureIntegrationTest do
     config: config
   } do
     assert {:ok, %UseCase{} = use_case} =
-             PromptOnSDK.use_case("diary_generation", prompt: "ko")
+             PromptOnSDK.use_case("greeting", prompt: "ko")
 
     assert use_case.source == :remote
     assert use_case.prompt == "ko"
@@ -57,51 +57,57 @@ defmodule PromptOnSDK.LiveFixtureIntegrationTest do
               %{role: "system", content: system},
               %{role: "user", content: user}
             ]} =
-             PromptOnSDK.messages(use_case, %{transcriptions: ["안녕"], mode: "fresh"})
+             PromptOnSDK.messages(use_case, %{name: "아다"})
 
-    assert system =~ "Korean"
-    assert user =~ "1. 안녕"
+    assert system =~ "친절한 인사 도우미"
+    assert user == "아다님에게 인사해줘."
 
-    assert {:ok, text_use_case} = PromptOnSDK.use_case("voice_transcription")
-    assert {:ok, text} = PromptOnSDK.text(text_use_case, %{})
-    assert is_binary(text)
+    assert {:ok, text_use_case} = PromptOnSDK.use_case("summarize")
+    assert {:ok, text} = PromptOnSDK.text(text_use_case, %{items: ["alpha", "beta"]})
+    assert text =~ "- alpha"
+    assert text =~ "- beta"
 
     assert PromptOnSDK.use_case("does_not_exist") == {:error, :unknown_use_case}
 
-    assert PromptOnSDK.use_case("diary_generation", prompt: "does_not_exist") ==
+    assert PromptOnSDK.use_case("greeting", prompt: "does_not_exist") ==
              {:error, :unknown_prompt}
 
     assert {:ok, %{status: 200, body: remote}} =
-             post_prompt(config, "diary_generation", %{
+             post_prompt(config, "greeting", %{
                "prompt" => "ko",
-               "variables" => %{"transcriptions" => ["안녕"], "mode" => "fresh"}
+               "variables" => %{"name" => "아다"}
              })
 
-    assert get_in(remote, ["messages", Access.at(0), "content"]) =~ "Korean"
-    assert get_in(remote, ["messages", Access.at(1), "content"]) =~ "1. 안녕"
+    assert remote["key"] == "greeting"
+    assert remote["source"] == "remote"
+    assert get_in(remote, ["messages", Access.at(0), "content"]) =~ "친절한 인사 도우미"
+    assert get_in(remote, ["messages", Access.at(1), "content"]) == "아다님에게 인사해줘."
     assert remote["prompt"] == "ko"
-    assert is_binary(remote["prompt_version_id"])
+    assert is_binary(remote["prompt_version"]["id"])
 
     assert {:ok, %{status: status, body: body}} =
              post_prompt(config, "does_not_exist", %{"variables" => %{}})
 
     assert status in [404, 422]
-    assert error_string(body) =~ "unknown_use_case"
+    assert get_in(body, ["error", "code"]) == "not_found"
+    assert get_in(body, ["error", "details", "key"]) == "does_not_exist"
 
     assert {:ok, %{status: status, body: body}} =
-             post_prompt(config, "diary_generation", %{
+             post_prompt(config, "greeting", %{
                "prompt" => "does_not_exist",
-               "variables" => %{"transcriptions" => ["안녕"], "mode" => "fresh"}
+               "variables" => %{"name" => "아다"}
              })
 
     assert status in [404, 422]
-    assert error_string(body) =~ "unknown_prompt"
+    assert get_in(body, ["error", "details", "reason"]) == "unknown_prompt"
+    assert get_in(body, ["error", "details", "key"]) == "greeting"
+    assert get_in(body, ["error", "details", "prompt_names"]) == ["default", "ko"]
   end
 
   test "POST /logs accepts the first live fixture log and reports duplicate resend", %{
     config: config
   } do
-    assert {:ok, %UseCase{} = use_case} = PromptOnSDK.use_case("diary_generation")
+    assert {:ok, %UseCase{} = use_case} = PromptOnSDK.use_case("greeting")
 
     log = %{
       "id" => PromptOnSDK.log_id(),
@@ -137,12 +143,12 @@ defmodule PromptOnSDK.LiveFixtureIntegrationTest do
   end
 
   test "messages(prompt: name) feeds the next track/3 log evidence once" do
-    assert {:ok, default_use_case} = PromptOnSDK.use_case("diary_generation")
+    assert {:ok, default_use_case} = PromptOnSDK.use_case("greeting")
 
     assert {:ok, msgs} =
              PromptOnSDK.messages(
                default_use_case,
-               %{transcriptions: ["안녕"], mode: "fresh"},
+               %{name: "아다"},
                prompt: "ko"
              )
 
@@ -203,7 +209,4 @@ defmodule PromptOnSDK.LiveFixtureIntegrationTest do
       {:error, reason} -> {:error, reason}
     end
   end
-
-  defp error_string(body) when is_map(body), do: Jason.encode!(body)
-  defp error_string(body), do: to_string(body)
 end
