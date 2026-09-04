@@ -13,7 +13,7 @@ defmodule PromptOnSDK.Config do
   | `api_key` | `nil` | `ptn_<project_slug>_…` format (project key). `nil` means disk/bundle only, no remote calls |
   | `environment` | `"production"` | Environment slug this app reads. The `GET /snapshot?environment=…` query and the disk/bundle guard reference |
   | `base_url` | `nil` | `https://prompton.example/api/v1` (trailing `/` removed) |
-  | `poll_interval` | `30_000` | ETag polling interval (ms). Also the minimum for failure backoff |
+  | `poll_interval` | `10_000` | ETag polling interval (ms). Also the minimum for failure backoff |
   | `disk_cache` | `nil` | Snapshot disk cache path. `nil` disables it |
   | `bundle` | `nil` | `{:file, path}`: the last-resort fallback bundle |
   | `log` | below | `flush_interval: 2_000, flush_size: 100, flush_bytes: 1_000_000, max_buffer: 10_000, redact: nil` |
@@ -84,7 +84,7 @@ defmodule PromptOnSDK.Config do
       api_key: api_key,
       environment: environment,
       base_url: merged |> fetch_string(:base_url) |> trim_slash(),
-      poll_interval: fetch_pos_int(merged, :poll_interval, 30_000),
+      poll_interval: fetch_pos_int(merged, :poll_interval, 10_000),
       disk_cache: fetch_string(merged, :disk_cache),
       bundle: fetch_bundle(merged),
       log: fetch_log(merged),

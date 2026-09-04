@@ -36,7 +36,7 @@ config :prompton_sdk,
   api_key: System.fetch_env!("PTN_API_KEY"),          # ptn_<project>_… — a project key
   environment: "production",                               # which environment this app reads (default)
   base_url: "https://prompton.example/api/v1",
-  poll_interval: :timer.seconds(30),                       # ETag polling
+  poll_interval: :timer.seconds(10),                       # ETag polling
   disk_cache: "/var/lib/myapp/prompton_snapshot.json",     # nil disables (k8s: emptyDir volume)
   bundle: {:file, Application.app_dir(:myapp, "priv/prompton/snapshot.json")},  # last-resort fallback
   log: [flush_interval: 2_000, flush_size: 100, flush_bytes: 1_000_000, max_buffer: 10_000,
@@ -50,7 +50,7 @@ config :prompton_sdk,
 | `api_key` | `nil` | `ptn_<project_slug>_…`; without it no remote calls are made |
 | `environment` | `"production"` | sent as `GET /snapshot?environment=…` and used as the disk/bundle guard |
 | `base_url` | `nil` | trailing `/` trimmed |
-| `poll_interval` | 30 s | also the base of the failure backoff (×2 up to 5 min) |
+| `poll_interval` | 10 s | also the base of the failure backoff (×2 up to 5 min) |
 | `disk_cache` | `nil` | atomic tmp→rename; sidecar `<path>.meta.json` holds ETag / Last-Modified |
 | `bundle` | `nil` | `{:file, path}` produced by `mix prompton.export` |
 | `log` | see above | `redact` is `fn generation_map -> map`, applied last |
@@ -80,7 +80,7 @@ boot:  init loads disk cache, then bundle (synchronously, if present, valid and 
          200  → persistent_term + disk cache + sidecar          source: :remote
          fail → keep disk/bundle, poll in the background        source: :disk | :bundle  (stale telemetry with age)
          nothing at all → resolve returns {:error, :not_ready}  source: :none
-poll:  If-None-Match every poll_interval; 304 = no-op; 200 = swap; failures back off 30 s → 5 min
+poll:  If-None-Match every poll_interval; 304 = no-op; 200 = swap; failures back off 10 s → 5 min
 ```
 
 The disk cache and bundle are refused with a warning when their `environment` differs from the configured

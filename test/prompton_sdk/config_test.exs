@@ -17,7 +17,7 @@ defmodule PromptOnSDK.ConfigTest do
     config = Config.load([])
 
     assert config.mode == :live
-    assert config.poll_interval == 30_000
+    assert config.poll_interval == 10_000
     assert config.api_key == nil
     assert config.base_url == nil
     assert config.disk_cache == nil

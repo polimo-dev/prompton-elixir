@@ -16,7 +16,7 @@ defmodule PromptOnSDK.Snapshot do
               + [:prompton, :snapshot, :fetch_error] + [:prompton, :snapshot, :stale] (age)
               with no entry, resolve returns {:error, :not_ready}
       afterwards: If-None-Match polling every poll_interval. Failures back off exponentially,
-              poll_interval×2ⁿ (default 30s → 60 → 120 → 240 → 300s cap)
+              poll_interval×2ⁿ (default 10s → 20 → 40 → 80 → 160 → 300s cap)
 
   ## Modes
 
