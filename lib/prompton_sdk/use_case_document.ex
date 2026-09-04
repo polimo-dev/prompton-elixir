@@ -1,52 +1,34 @@
-defmodule PromptOnSDK.SnapshotData do
+defmodule PromptOnSDK.UseCaseDocument do
   @moduledoc """
-  Decodes the `GET /snapshot` response (§6.2) into the SDK's internal structure. Reads **schema v3
-  only**.
+  Decodes the `GET /use-cases` response into the SDK's use-case document structure.
 
-  The input is a string-keyed map produced by `Jason.decode/1` (or that JSON string). Atom-keyed
-  maps are accepted leniently too (hand-written maps, as with `PromptOnSDK.Test.put_snapshot/1`).
-  The output is a `t:t/0` struct:
+  The SDK reads **schema v4 only**. A document contains deployed use cases, their deployments,
+  pinned prompt versions, and model records. The decoded value is consumed by
+  `PromptOnSDK.use_case/2` and by test helpers.
 
-  * `use_cases`: `use_case_key => %{id, key, kind, input_schema, default_params, payload_policy,
-    deployment: deployment | nil}`
-  * `deployments`: `use_case_key => %{id, use_case_key, revision, model_id, params,
-    provider_options, prompt_pins}`
-  * `prompt_versions` / `models`: maps keyed by id
-
-  `kind`, `engine`, `payload_policy.mode`, and `provider` are atoms.
-  `params`, `provider_options`, `default_params`, `metadata`, and `prompt_pins` are left as
-  **string-keyed maps, as is** (the app serializes them into the request body, so their shape is
-  not changed).
-
-  ## Schema version (v3, ADR 0007 revision 2026-09-01)
-
-  A deployment revision is **a pin, not a router**: rules, conditions, targets, weights, A/B, and
-  context dimensions are all gone; one revision is one model (`model_id`/`params`/
-  `provider_options`) plus a version pin per prompt name (`prompt_pins`). The shape of
-  `deployments[key]`:
-
-      %{"id" => "...", "revision" => 3, "model_id" => "...",
-        "params" => %{}, "provider_options" => %{},
-        "prompt_pins" => %{"default" => "<version id>", "ko" => "<version id>"}}
-
-  v1 (Release/Variant) and v2 (rules/targets) snapshots are **not read**:
-  `{:error, {:unsupported_schema_version, n}}`. A version newer than the known one (4 or above)
-  leaves an `{:unknown_schema_version, n}` warning and decodes only the known fields (§6.1
-  "additive changes only"). Unknown enum values (`kind`, etc.) are not rejected either: a warning
-  is left and the raw value is preserved as an atom.
-
-  ## Return
-
-  Both `decode/1` and `decode_json/1` return `{:ok, data, warnings}` or `{:error, reason}`.
-  `reason` is `{:invalid_json, term}`, `{:invalid_snapshot, message}`, or
-  `{:unsupported_schema_version, n}`.
+  Atom-keyed maps are accepted for hand-written tests, but server responses and bundle files are
+  expected to be JSON/string-keyed maps.
   """
 
-  @schema_version 3
+  @schema_version 4
   @kinds ~w(chat text embedding)
   @engines ~w(liquid raw)
   @payload_modes ~w(full hash none)
   @variable_types ~w(string number boolean list map)
+  @providers ~w(openrouter groq openai anthropic google other)
+  @model_statuses ~w(active deprecated)
+  @known_values @kinds ++
+                  @engines ++ @payload_modes ++ @variable_types ++ @providers ++ @model_statuses
+  @known_value_atom_lookup Map.new(@known_values, &{&1, String.to_atom(&1)})
+
+  @atom_keys ~w(
+    capabilities content context_length default_params deployments description display_name encrypt
+    encrypt? engine environment example id input_schema kind max_bytes messages metadata mode
+    model_id models name number payload_policy pricing project prompt_id prompt_pins
+    prompt_versions provider provider_options required required? retention_days revision role
+    sample_rate schema_version status text_template use_cases
+  )
+  @atom_key_lookup Map.new(@atom_keys, &{&1, String.to_atom(&1)})
 
   @type warning :: {atom(), term()}
 
@@ -75,7 +57,7 @@ defmodule PromptOnSDK.SnapshotData do
           prompt_id: String.t() | nil,
           number: integer() | nil,
           engine: :liquid | :raw,
-          messages: [PromptOnSDK.Resolution.message()] | nil,
+          messages: [PromptOnSDK.UseCase.message()] | nil,
           text_template: String.t() | nil
         }
 
@@ -110,7 +92,7 @@ defmodule PromptOnSDK.SnapshotData do
             prompt_versions: %{},
             models: %{}
 
-  @doc "The snapshot schema version this SDK reads."
+  @doc false
   @spec schema_version() :: pos_integer()
   def schema_version, do: @schema_version
 
@@ -119,7 +101,7 @@ defmodule PromptOnSDK.SnapshotData do
   def decode_json(json) when is_binary(json) do
     case Jason.decode(json) do
       {:ok, map} when is_map(map) -> decode(map)
-      {:ok, _other} -> {:error, {:invalid_snapshot, "top level must be an object"}}
+      {:ok, _other} -> {:error, {:invalid_use_case_document, "top level must be an object"}}
       {:error, reason} -> {:error, {:invalid_json, reason}}
     end
   end
@@ -153,7 +135,7 @@ defmodule PromptOnSDK.SnapshotData do
     end
   end
 
-  def decode(_), do: {:error, {:invalid_snapshot, "snapshot must be a map"}}
+  def decode(_), do: {:error, {:invalid_use_case_document, "use-case document must be a map"}}
 
   @doc "The Deployment for a use case key. `nil` when there is none."
   @spec deployment(t(), String.t() | atom()) :: deployment() | nil
@@ -166,35 +148,32 @@ defmodule PromptOnSDK.SnapshotData do
   # ---------------------------------------------------------------------------
   # top level
 
-  defp schema_version(map),
-    do: check_schema_version(get(map, "schema_version") || get(map, "version"), map)
+  defp schema_version(map), do: check_schema_version(get(map, "schema_version"))
 
-  defp check_schema_version(@schema_version, _map), do: {:ok, @schema_version, []}
+  defp check_schema_version(@schema_version), do: {:ok, @schema_version, []}
 
-  defp check_schema_version(v, _map) when is_integer(v) and v > @schema_version,
-    do: {:ok, v, [{:unknown_schema_version, v}]}
-
-  defp check_schema_version(v, _map) when is_integer(v) and v > 0,
+  defp check_schema_version(v) when is_integer(v) and v > 0,
     do: {:error, {:unsupported_schema_version, v}}
 
-  # Even without a version marker, treat it as v3 when `deployments` is present (for hand-written
-  # test maps).
-  defp check_schema_version(nil, map) do
-    if is_map(get(map, "deployments")),
-      do: {:ok, @schema_version, []},
-      else: {:error, {:invalid_snapshot, "schema_version is required"}}
-  end
+  defp check_schema_version(nil),
+    do: {:error, {:invalid_use_case_document, "schema_version is required"}}
 
-  defp check_schema_version(other, _map),
+  defp check_schema_version(other),
     do:
       {:error,
-       {:invalid_snapshot, "schema_version must be a positive integer, got: #{inspect(other)}"}}
+       {:invalid_use_case_document,
+        "schema_version must be a positive integer, got: #{inspect(other)}"}}
 
   defp fetch_map(map, key) do
     case get(map, key) do
-      v when is_map(v) -> {:ok, v}
-      nil -> {:error, {:invalid_snapshot, "#{key} is required"}}
-      other -> {:error, {:invalid_snapshot, "#{key} must be an object, got: #{inspect(other)}"}}
+      v when is_map(v) ->
+        {:ok, v}
+
+      nil ->
+        {:error, {:invalid_use_case_document, "#{key} is required"}}
+
+      other ->
+        {:error, {:invalid_use_case_document, "#{key} must be an object, got: #{inspect(other)}"}}
     end
   end
 
@@ -415,7 +394,7 @@ defmodule PromptOnSDK.SnapshotData do
   defp decode_model(raw, warnings) do
     {%{
        id: to_str(get(raw, "id")),
-       provider: to_atom_or_nil(get(raw, "provider")),
+       provider: to_known_atom_or_nil(get(raw, "provider"), @providers),
        model_id: to_str(get(raw, "model_id")),
        display_name: to_str(get(raw, "display_name")),
        metadata: to_string_key_map(get(raw, "metadata")),
@@ -428,7 +407,7 @@ defmodule PromptOnSDK.SnapshotData do
          |> Enum.reject(&is_nil/1),
        pricing: get(raw, "pricing"),
        context_length: to_int(get(raw, "context_length"), nil),
-       status: to_atom_or_nil(get(raw, "status"))
+       status: to_known_atom_or_nil(get(raw, "status"), @model_statuses)
      }, warnings}
   end
 
@@ -439,7 +418,7 @@ defmodule PromptOnSDK.SnapshotData do
   defp get(map, key) when is_map(map) and is_binary(key) do
     case Map.fetch(map, key) do
       {:ok, v} -> v
-      :error -> Map.get(map, String.to_atom(key))
+      :error -> Map.get(map, @atom_key_lookup[key])
     end
   end
 
@@ -466,13 +445,19 @@ defmodule PromptOnSDK.SnapshotData do
   defp to_number(v, _default) when is_number(v), do: v
   defp to_number(_, default), do: default
 
-  defp to_atom_or_nil(nil), do: nil
-  defp to_atom_or_nil(v) when is_atom(v), do: v
-  defp to_atom_or_nil(v) when is_binary(v) and v != "", do: String.to_atom(v)
-  defp to_atom_or_nil(_), do: nil
+  defp to_known_atom_or_nil(nil, _allowed), do: nil
 
-  # A known value becomes an atom; an unknown value gets a warning + the raw value as an atom (for
-  # additive changes); nil gives the default.
+  defp to_known_atom_or_nil(v, allowed) when is_atom(v),
+    do: to_known_atom_or_nil(Atom.to_string(v), allowed)
+
+  defp to_known_atom_or_nil(v, allowed) when is_binary(v) do
+    if v in allowed, do: @known_value_atom_lookup[v]
+  end
+
+  defp to_known_atom_or_nil(_v, _allowed), do: nil
+
+  # A known value becomes an atom; an unknown value gets a warning and falls back to the default
+  # without creating atoms from remote values; nil gives the default.
   defp to_enum(nil, _allowed, default, _warning_tag, warnings), do: {default, warnings}
 
   defp to_enum(v, allowed, default, warning_tag, warnings) do
@@ -480,8 +465,8 @@ defmodule PromptOnSDK.SnapshotData do
 
     cond do
       is_nil(str) -> {default, [{warning_tag, v} | warnings]}
-      str in allowed -> {String.to_atom(str), warnings}
-      true -> {String.to_atom(str), [{warning_tag, str} | warnings]}
+      str in allowed -> {@known_value_atom_lookup[str], warnings}
+      true -> {default, [{warning_tag, str} | warnings]}
     end
   end
 

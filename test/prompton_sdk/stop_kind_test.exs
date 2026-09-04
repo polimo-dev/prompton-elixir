@@ -37,7 +37,7 @@ defmodule PromptOnSDK.StopKindTest do
     end
 
     # Feeding a normalized value back in as a string yields the same value (Generation.build
-    # re-normalizes outcome.stop_kind)
+    # re-normalizes provider_result.stop_kind)
     assert "tool_calls" |> StopKind.normalize() |> Atom.to_string() |> StopKind.normalize() ==
              :tool_call
   end

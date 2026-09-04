@@ -1,15 +1,16 @@
-defmodule PromptOnSDK.SnapshotDataTest do
-  @moduledoc "Snapshot v3 decoding contract; v1/v2 are no longer read."
+defmodule PromptOnSDK.UseCaseDocumentTest do
+  @moduledoc "Use-case document v4 decoding contract; v1-v3 are no longer read."
 
   use ExUnit.Case, async: true
 
-  alias PromptOnSDK.{Fixtures, SnapshotData}
+  alias PromptOnSDK.{Fixtures, UseCaseDocument}
 
   describe "decode/1" do
-    test "decodes the reference snapshot with no warnings" do
-      assert {:ok, data, []} = SnapshotData.decode(Fixtures.snapshot())
+    test "decodes the reference use-case document with no warnings" do
+      assert {:ok, data, []} = UseCaseDocument.decode(Fixtures.snapshot())
 
-      assert data.schema_version == 3
+      assert %UseCaseDocument{} = data
+      assert data.schema_version == 4
       assert data.project == "heydiary"
       assert data.environment == "production"
       assert map_size(data.use_cases) == 5
@@ -19,8 +20,8 @@ defmodule PromptOnSDK.SnapshotDataTest do
     end
 
     test "deployments decode to pins" do
-      {:ok, data, []} = SnapshotData.decode(Fixtures.snapshot())
-      deployment = SnapshotData.deployment(data, "diary_generation")
+      {:ok, data, []} = UseCaseDocument.decode(Fixtures.snapshot())
+      deployment = UseCaseDocument.deployment(data, "diary_generation")
 
       assert deployment.id == Fixtures.id(:d_diary)
       assert deployment.use_case_key == "diary_generation"
@@ -36,16 +37,16 @@ defmodule PromptOnSDK.SnapshotDataTest do
     end
 
     test "the deployment is attached to its use case" do
-      {:ok, data, []} = SnapshotData.decode(Fixtures.snapshot())
+      {:ok, data, []} = UseCaseDocument.decode(Fixtures.snapshot())
 
       assert data.use_cases["diary_generation"].deployment.id == Fixtures.id(:d_diary)
       assert data.use_cases["transcript_revision"].deployment == nil
-      assert SnapshotData.deployment(data, :chat_response).id == Fixtures.id(:d_chat)
-      assert SnapshotData.deployment(data, "nope") == nil
+      assert UseCaseDocument.deployment(data, :chat_response).id == Fixtures.id(:d_chat)
+      assert UseCaseDocument.deployment(data, "nope") == nil
     end
 
     test "enums become atoms, opaque maps stay string-keyed" do
-      {:ok, data, []} = SnapshotData.decode(Fixtures.snapshot())
+      {:ok, data, []} = UseCaseDocument.decode(Fixtures.snapshot())
 
       assert data.use_cases["diary_generation"].kind == :chat
       assert data.use_cases["diary_embedding"].kind == :embedding
@@ -56,9 +57,9 @@ defmodule PromptOnSDK.SnapshotDataTest do
       assert data.use_cases["diary_generation"].payload_policy.mode == :full
     end
 
-    test "atom-keyed maps (hand-written test snapshots) decode too" do
+    test "atom-keyed maps (hand-written test documents) decode too" do
       map = %{
-        schema_version: 3,
+        schema_version: 4,
         environment: "staging",
         use_cases: %{"greet" => %{id: "u1", kind: "chat"}},
         deployments: %{
@@ -68,55 +69,54 @@ defmodule PromptOnSDK.SnapshotDataTest do
         models: %{"m1" => %{id: "m1", model_id: "openai/gpt-5-mini"}}
       }
 
-      assert {:ok, data, []} = SnapshotData.decode(map)
+      assert {:ok, data, []} = UseCaseDocument.decode(map)
       assert data.environment == "staging"
       assert data.deployments["greet"].prompt_pins == %{"default" => "p1"}
     end
 
     test "decode_json/1 round-trips" do
       json = Jason.encode!(Fixtures.snapshot())
-      assert {:ok, data, []} = SnapshotData.decode_json(json)
+      assert {:ok, data, []} = UseCaseDocument.decode_json(json)
+      assert %UseCaseDocument{} = data
       assert data.deployments["chat_response"].model_id == Fixtures.id(:m_gpt5_mini)
     end
 
-    test "a %SnapshotData{} passes through" do
+    test "a decoded use-case document passes through" do
       data = Fixtures.snapshot_data()
-      assert {:ok, ^data, []} = SnapshotData.decode(data)
+      assert {:ok, ^data, []} = UseCaseDocument.decode(data)
     end
   end
 
   describe "schema versions" do
-    test "v1 and v2 snapshots are refused" do
-      for version <- [1, 2] do
+    test "v1, v2, and v3 documents are refused" do
+      for version <- [1, 2, 3] do
         map = Map.put(Fixtures.snapshot(), "schema_version", version)
-        assert {:error, {:unsupported_schema_version, ^version}} = SnapshotData.decode(map)
+        assert {:error, {:unsupported_schema_version, ^version}} = UseCaseDocument.decode(map)
       end
     end
 
-    test "a newer version decodes the fields it knows, with a warning" do
-      map = Map.put(Fixtures.snapshot(), "schema_version", 4)
+    test "a newer version is refused" do
+      map = Map.put(Fixtures.snapshot(), "schema_version", 5)
 
-      assert {:ok, data, warnings} = SnapshotData.decode(map)
-      assert warnings == [{:unknown_schema_version, 4}]
-      assert data.deployments["diary_generation"].revision == 4
+      assert {:error, {:unsupported_schema_version, 5}} = UseCaseDocument.decode(map)
     end
 
-    test "a missing version is v3 when `deployments` is present" do
+    test "schema_version is required even when `deployments` is present" do
       map = Map.delete(Fixtures.snapshot(), "schema_version")
-      assert {:ok, data, []} = SnapshotData.decode(map)
-      assert data.schema_version == 3
+      assert {:error, {:invalid_use_case_document, message}} = UseCaseDocument.decode(map)
+      assert message =~ "schema_version is required"
     end
 
-    test "a missing version with no deployments is an error" do
-      assert {:error, {:invalid_snapshot, message}} =
-               SnapshotData.decode(%{"use_cases" => %{}})
+    test "schema_version is required before other required fields are checked" do
+      assert {:error, {:invalid_use_case_document, message}} =
+               UseCaseDocument.decode(%{"use_cases" => %{}})
 
       assert message =~ "schema_version"
     end
 
     test "a non-integer version is an error" do
-      assert {:error, {:invalid_snapshot, message}} =
-               SnapshotData.decode(Map.put(Fixtures.snapshot(), "schema_version", "3"))
+      assert {:error, {:invalid_use_case_document, message}} =
+               UseCaseDocument.decode(Map.put(Fixtures.snapshot(), "schema_version", "4"))
 
       assert message =~ "positive integer"
     end
@@ -124,22 +124,22 @@ defmodule PromptOnSDK.SnapshotDataTest do
 
   describe "malformed input" do
     test "use_cases is required" do
-      assert {:error, {:invalid_snapshot, message}} =
-               SnapshotData.decode(%{"schema_version" => 3})
+      assert {:error, {:invalid_use_case_document, message}} =
+               UseCaseDocument.decode(%{"schema_version" => 4})
 
       assert message =~ "use_cases is required"
     end
 
     test "a non-map top level is refused" do
-      assert {:error, {:invalid_snapshot, _}} = SnapshotData.decode("nope")
-      assert {:error, {:invalid_snapshot, _}} = SnapshotData.decode_json("[]")
-      assert {:error, {:invalid_json, _}} = SnapshotData.decode_json("{oops")
+      assert {:error, {:invalid_use_case_document, _}} = UseCaseDocument.decode("nope")
+      assert {:error, {:invalid_use_case_document, _}} = UseCaseDocument.decode_json("[]")
+      assert {:error, {:invalid_json, _}} = UseCaseDocument.decode_json("{oops")
     end
 
     test "a broken deployment entry is warned about, the rest still decodes" do
       map = put_in(Fixtures.snapshot(), ["deployments", "chat_response"], "nope")
 
-      assert {:ok, data, warnings} = SnapshotData.decode(map)
+      assert {:ok, data, warnings} = UseCaseDocument.decode(map)
       assert {:invalid_deployment, {"chat_response", "nope"}} in warnings
       assert data.deployments["diary_generation"].revision == 4
       refute Map.has_key?(data.deployments, "chat_response")
@@ -148,17 +148,17 @@ defmodule PromptOnSDK.SnapshotDataTest do
     test "broken prompt_pins are warned about" do
       map = put_in(Fixtures.snapshot(), ["deployments", "chat_response", "prompt_pins"], "nope")
 
-      assert {:ok, data, warnings} = SnapshotData.decode(map)
+      assert {:ok, data, warnings} = UseCaseDocument.decode(map)
       assert {:invalid_prompt_pins, {"chat_response", "nope"}} in warnings
       assert data.deployments["chat_response"].prompt_pins == %{}
     end
 
-    test "an unknown kind is kept as an atom with a warning" do
+    test "an unknown kind falls back to chat with a warning" do
       map = put_in(Fixtures.snapshot(), ["use_cases", "chat_response", "kind"], "vision")
 
-      assert {:ok, data, warnings} = SnapshotData.decode(map)
+      assert {:ok, data, warnings} = UseCaseDocument.decode(map)
       assert {:unknown_kind, "vision"} in warnings
-      assert data.use_cases["chat_response"].kind == :vision
+      assert data.use_cases["chat_response"].kind == :chat
     end
   end
 end

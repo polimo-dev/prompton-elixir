@@ -1,42 +1,14 @@
 defmodule PromptOnSDK.Snapshot.Store do
-  @moduledoc """
-  Snapshot store: the `:persistent_term {PromptOnSDK, :snapshot}` entry plus disk cache/sidecar
-  I/O (§7.3).
+  @moduledoc false
 
-  ## persistent_term entry
-
-      %{data: %PromptOnSDK.SnapshotData{}, etag: String.t | nil, last_modified: String.t | nil,
-        source: :remote | :disk | :bundle | :manual, fetched_at: DateTime.t, stale_since: DateTime.t | nil,
-        environment: String.t | nil}
-
-  **One fully parsed map** is stored as a whole; it is not split per UseCase, for update
-  atomicity. Reads (`get/0`) are copy-free and lock-free. `:persistent_term` triggers a global GC
-  on update, but at most once per 30 seconds that is negligible.
-
-  ## Disk cache
-
-  The server response's **raw bytes** are stored at `<path>`, and `etag`/`last_modified`/
-  `environment`/`fetched_at` in the `<path>.meta.json` sidecar (the body carries no timestamp
-  fields, because the ETag is a hash of the body, §6.2). Writes are atomic via tmp → rename.
-  The bundle file produced by `mix prompton.export` has the same format, so `load_file/2` reads
-  both.
-
-  ## Environment guard
-
-  `load_file/2` rejects a file snapshot whose `environment` differs from the configured
-  `environment` (= `env_slug`) with `{:error, {:environment_mismatch, file_env, key_env}}`
-  (§7.3(b): prevents the accident of booting a staging bundle with a production key).
-  When `env_slug` is `nil`, the guard is skipped.
-  """
-
-  alias PromptOnSDK.SnapshotData
+  alias PromptOnSDK.UseCaseDocument
 
   @key {PromptOnSDK, :snapshot}
 
   @type source :: :remote | :disk | :bundle | :manual
 
   @type entry :: %{
-          data: SnapshotData.t(),
+          data: UseCaseDocument.t(),
           etag: String.t() | nil,
           last_modified: String.t() | nil,
           source: source(),
@@ -51,15 +23,15 @@ defmodule PromptOnSDK.Snapshot.Store do
 
   @doc "Stores an entry."
   @spec put(entry()) :: :ok
-  def put(%{data: %SnapshotData{}} = entry), do: :persistent_term.put(@key, entry)
+  def put(%{data: %UseCaseDocument{}} = entry), do: :persistent_term.put(@key, entry)
 
   @doc "Erases the entry (tests / `PromptOnSDK.Test.clear/0`)."
   @spec erase() :: boolean()
   def erase, do: :persistent_term.erase(@key)
 
   @doc "Builds a new entry."
-  @spec new_entry(SnapshotData.t(), source(), keyword()) :: entry()
-  def new_entry(%SnapshotData{} = data, source, opts \\ []) do
+  @spec new_entry(UseCaseDocument.t(), source(), keyword()) :: entry()
+  def new_entry(%UseCaseDocument{} = data, source, opts \\ []) do
     %{
       data: data,
       etag: Keyword.get(opts, :etag),
@@ -78,7 +50,7 @@ defmodule PromptOnSDK.Snapshot.Store do
   @spec load_file(String.t(), source(), String.t() | nil) :: {:ok, entry()} | {:error, term()}
   def load_file(path, source, env_slug) do
     with {:ok, body} <- read_file(path),
-         {:ok, data, _warnings} <- SnapshotData.decode_json(body),
+         {:ok, data, _warnings} <- UseCaseDocument.decode_json(body),
          :ok <- guard_environment(data, env_slug) do
       meta = read_meta(path)
 
@@ -119,11 +91,11 @@ defmodule PromptOnSDK.Snapshot.Store do
   end
 
   @doc "Environment guard. Passes when `env_slug` is `nil`."
-  @spec guard_environment(SnapshotData.t(), String.t() | nil) ::
+  @spec guard_environment(UseCaseDocument.t(), String.t() | nil) ::
           :ok | {:error, {:environment_mismatch, String.t() | nil, String.t()}}
   def guard_environment(_data, nil), do: :ok
 
-  def guard_environment(%SnapshotData{environment: env}, env_slug) do
+  def guard_environment(%UseCaseDocument{environment: env}, env_slug) do
     if env == env_slug, do: :ok, else: {:error, {:environment_mismatch, env, env_slug}}
   end
 
@@ -139,7 +111,7 @@ defmodule PromptOnSDK.Snapshot.Store do
     if base, do: max(DateTime.diff(now, base, :second), 0), else: nil
   end
 
-  @doc "The `snapshot_info/0` shape."
+  @doc "The `use_case_document_info/0` shape."
   @spec info(entry() | nil) :: map()
   def info(nil) do
     %{

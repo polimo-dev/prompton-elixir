@@ -1,7 +1,7 @@
 defmodule PromptOnSDK.Buffer do
   @moduledoc """
-  Log batcher GenServer (§7.5, §9.2 failure matrix). Collects generation/feedback items and sends
-  them with `POST /generations` / `POST /feedback`.
+  Log batcher GenServer (§7.5, §9.2 failure matrix). Collects log/feedback items and sends
+  them with `POST /logs` / `POST /feedback`.
 
   * **The caller is never blocked**: `enqueue/2` is a cast. The cost of encoding and policy
     application is split between the caller (`PromptOnSDK.log/1`) and this process, and sending is
@@ -43,14 +43,14 @@ defmodule PromptOnSDK.Buffer do
   @drain_timeout 5_000
   @warn_interval 60_000
 
-  @type lane :: :generations | :feedback
+  @type lane :: :logs | :feedback
 
   # `prebuilt`: pieces split after a 413. On the next send they go out before the queue, as they
   # are, without being re-merged.
   @empty_lane %{queue: :queue.new(), count: 0, bytes: 0, prebuilt: []}
 
   defstruct config: nil,
-            lanes: %{generations: @empty_lane, feedback: @empty_lane},
+            lanes: %{logs: @empty_lane, feedback: @empty_lane},
             timer: nil,
             in_flight: %{},
             failures: 0,
@@ -78,7 +78,7 @@ defmodule PromptOnSDK.Buffer do
 
   @doc "Enqueues an item (cast). `{:error, :not_running}` when the process is not running."
   @spec enqueue(lane(), map()) :: :ok | {:error, :not_running}
-  def enqueue(lane, item) when lane in [:generations, :feedback] and is_map(item) do
+  def enqueue(lane, item) when lane in [:logs, :feedback] and is_map(item) do
     case Process.whereis(__MODULE__) do
       nil -> {:error, :not_running}
       pid -> GenServer.cast(pid, {:enqueue, lane, item})
@@ -143,7 +143,7 @@ defmodule PromptOnSDK.Buffer do
   def handle_call(:stats, _from, state) do
     {:reply,
      %{
-       generations: %{count: state.lanes.generations.count, bytes: state.lanes.generations.bytes},
+       logs: %{count: state.lanes.logs.count, bytes: state.lanes.logs.bytes},
        feedback: %{count: state.lanes.feedback.count, bytes: state.lanes.feedback.bytes},
        in_flight: map_size(state.in_flight),
        failures: state.failures,
@@ -300,7 +300,7 @@ defmodule PromptOnSDK.Buffer do
 
   defp put_lane(state, name, lane), do: %{state | lanes: Map.put(state.lanes, name, lane)}
 
-  defp pending(state), do: state.lanes.generations.count + state.lanes.feedback.count
+  defp pending(state), do: state.lanes.logs.count + state.lanes.feedback.count
 
   defp note_drop(state, _lane, 0, _reason), do: state
 
@@ -360,7 +360,7 @@ defmodule PromptOnSDK.Buffer do
   end
 
   defp start_batches(state) do
-    Enum.reduce([:generations, :feedback], state, fn lane_name, state ->
+    Enum.reduce([:logs, :feedback], state, fn lane_name, state ->
       start_lane_batches(state, lane_name)
     end)
   end
@@ -393,7 +393,7 @@ defmodule PromptOnSDK.Buffer do
     %{state | in_flight: Map.put(state.in_flight, task.ref, {lane_name, items, bytes, task})}
   end
 
-  defp send_batch(config, :generations, maps), do: config.client.post_generations(config, maps)
+  defp send_batch(config, :logs, maps), do: config.client.post_logs(config, maps)
   defp send_batch(config, :feedback, maps), do: config.client.post_feedback(config, maps)
 
   defp schedule(%{timer: nil} = state, ms) do
@@ -594,7 +594,7 @@ defmodule PromptOnSDK.Buffer do
   end
 
   defp drain_lanes(state, deadline) do
-    Enum.reduce([:generations, :feedback], state, &drain_lane(&2, &1, deadline))
+    Enum.reduce([:logs, :feedback], state, &drain_lane(&2, &1, deadline))
   end
 
   defp drain_lane(state, lane_name, deadline) do

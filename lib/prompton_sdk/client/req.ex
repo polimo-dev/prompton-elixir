@@ -3,14 +3,14 @@ defmodule PromptOnSDK.Client.Req do
   Default implementation of `PromptOnSDK.Client`, based on `Req`.
 
   * Bearer auth (`api_key`), `Accept: application/json`, `retry: false` (the retry policy is owned
-    by Snapshot/Buffer), timeout from `config.http[:receive_timeout]` (default 5 seconds). The
+    by the loader/Buffer), timeout from `config.http[:receive_timeout]` (default 5 seconds). The
     remaining keys of `config.http` (including `plug:`) are passed to Req as they are.
-  * `GET /snapshot` appends `?environment=<slug>` (the `environment` setting, default
+  * `GET /use-cases` appends `?environment=<slug>` (the `environment` setting, default
     `"production"`), sends `If-None-Match`, and does **not decode the body**
     (`decode_body: false`): the ETag is a hash of the body bytes, so the raw body is stored in the
     disk cache unchanged. Keys are per project, so this query is what selects the environment
     (2026-09-01).
-  * `POST /generations` and `POST /feedback` send `{"generations": [...]}` /
+  * `POST /logs` and `POST /feedback` send `{"logs": [...]}` /
     `{"feedback": [...]}` JSON.
   """
 
@@ -19,12 +19,12 @@ defmodule PromptOnSDK.Client.Req do
   alias PromptOnSDK.Config
 
   @impl true
-  def fetch_snapshot(%{} = config, etag, opts \\ []) do
+  def fetch_use_cases(%{} = config, etag, opts \\ []) do
     headers = if etag, do: [{"if-none-match", etag}], else: []
 
     req_opts =
       [
-        url: "/snapshot",
+        url: "/use-cases",
         params: [environment: Map.get(config, :environment) || Config.default_environment()],
         headers: headers,
         decode_body: false
@@ -53,7 +53,7 @@ defmodule PromptOnSDK.Client.Req do
   end
 
   @impl true
-  def post_generations(config, items), do: post(config, "/generations", %{"generations" => items})
+  def post_logs(config, items), do: post(config, "/logs", %{"logs" => items})
 
   @impl true
   def post_feedback(config, items), do: post(config, "/feedback", %{"feedback" => items})

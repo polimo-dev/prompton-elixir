@@ -10,10 +10,10 @@ defmodule PromptOnSDK.ConformanceTest do
 
   use ExUnit.Case, async: true
 
-  alias PromptOnSDK.{Payload, Resolver, SnapshotData, StopKind, Template}
+  alias PromptOnSDK.{Payload, Resolver, StopKind, Template, UseCaseDocument}
 
   @dir Path.expand("../../conformance", __DIR__)
-  @files ~w(template.json resolve.json truncation.json stop_kind.json generation_record.json)
+  @files ~w(template.json use_case.json truncation.json stop_kind.json log_record.json)
 
   @payload_config %{
     payload_defaults: %{mode: :full, sample_rate: 1.0, max_bytes: 262_144},
@@ -26,7 +26,7 @@ defmodule PromptOnSDK.ConformanceTest do
   @stop_kinds ~w(stop length tool_call content_filter other)
   @kinds ~w(chat text embedding)
   @providers ~w(openrouter groq openai anthropic google other)
-  @resolution_sources ~w(remote disk bundle manual)
+  @sources ~w(remote disk bundle manual)
   @cost_sources ~w(provider catalog unknown)
   @uuid ~r/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
@@ -62,31 +62,31 @@ defmodule PromptOnSDK.ConformanceTest do
   end
 
   # ---------------------------------------------------------------------------
-  # resolve.json
+  # use_case.json
 
-  test "resolve.json: every snapshot decodes as schema v3" do
-    for {ref, raw} <- load("resolve.json")["snapshots"] do
-      assert {:ok, data, _warnings} = SnapshotData.decode(raw), "snapshot #{ref}"
-      assert data.schema_version == SnapshotData.schema_version()
+  test "use_case.json: every use-case document decodes as schema v4" do
+    for {ref, raw} <- load("use_case.json")["documents"] do
+      assert {:ok, data, _warnings} = UseCaseDocument.decode(raw), "document #{ref}"
+      assert data.schema_version == UseCaseDocument.schema_version()
     end
   end
 
-  test "resolve.json: every resolution case matches" do
-    doc = load("resolve.json")
+  test "use_case.json: every use-case case matches" do
+    doc = load("use_case.json")
     assert doc["default_prompt"] == Resolver.default_prompt()
 
-    snapshots =
-      Map.new(doc["snapshots"], fn {ref, raw} ->
-        {:ok, data, _} = SnapshotData.decode(raw)
+    documents =
+      Map.new(doc["documents"], fn {ref, raw} ->
+        {:ok, data, _} = UseCaseDocument.decode(raw)
         {ref, data}
       end)
 
     for c <- doc["cases"] do
-      data = Map.fetch!(snapshots, c["snapshot_ref"])
+      data = Map.fetch!(documents, c["document_ref"])
       assert data.environment == c["environment"], "environment of #{c["name"]}"
 
-      actual = resolve_expectation(data, c["use_case"], c["prompt"], c["variables"])
-      assert actual == c["expect"], "resolve case #{c["name"]}"
+      actual = use_case_expectation(data, c["use_case"], c["prompt"], c["variables"])
+      assert actual == c["expect"], "use case #{c["name"]}"
     end
   end
 
@@ -103,7 +103,7 @@ defmodule PromptOnSDK.ConformanceTest do
 
       config = %{@payload_config | hash_end_user: get_in(c, ["config", "hash_end_user"]) == true}
 
-      assert Payload.apply(c["generation"], policy, config) == c["expect"]["generation"],
+      assert Payload.apply(c["log"], policy, config) == c["expect"]["log"],
              "truncation case #{c["name"]}"
     end
   end
@@ -117,7 +117,7 @@ defmodule PromptOnSDK.ConformanceTest do
   test "truncation.json: every truncated string stays valid UTF-8 and within its cap" do
     for c <- load("truncation.json")["cases"] do
       max_bytes = c["policy"]["max_bytes"]
-      gen = c["expect"]["generation"]
+      gen = c["expect"]["log"]
 
       for message <- get_in(gen, ["input", "messages"]) || [],
           is_binary(message["content"]) do
@@ -150,10 +150,10 @@ defmodule PromptOnSDK.ConformanceTest do
   end
 
   # ---------------------------------------------------------------------------
-  # generation_record.json
+  # log_record.json
 
-  test "generation_record.json: every record satisfies the server's ingest rules" do
-    for %{"name" => name, "record" => r} <- load("generation_record.json")["records"] do
+  test "log_record.json: every record satisfies the server's ingest rules" do
+    for %{"name" => name, "record" => r} <- load("log_record.json")["records"] do
       for key <- @required_record_fields do
         assert Map.has_key?(r, key), "#{name} is missing the required field #{key}"
       end
@@ -168,7 +168,7 @@ defmodule PromptOnSDK.ConformanceTest do
       assert_optional_enum(r["kind"], @kinds, "#{name}: kind")
       assert_optional_enum(r["provider"], @providers, "#{name}: provider")
       assert_optional_enum(r["stop_kind"], @stop_kinds, "#{name}: stop_kind")
-      assert_optional_enum(r["resolution_source"], @resolution_sources, "#{name}: source")
+      assert_optional_enum(r["source"], @sources, "#{name}: source")
 
       assert_optional_enum(
         get_in(r, ["usage", "cost_source"]),
@@ -198,8 +198,8 @@ defmodule PromptOnSDK.ConformanceTest do
     end
   end
 
-  test "generation_record.json: every record already satisfies the default payload caps" do
-    for %{"name" => name, "record" => r} <- load("generation_record.json")["records"] do
+  test "log_record.json: every record already satisfies the default payload caps" do
+    for %{"name" => name, "record" => r} <- load("log_record.json")["records"] do
       policy = %{mode: :full, sample_rate: 1.0, max_bytes: 262_144}
 
       assert Payload.apply(r, policy, @payload_config) == r,
@@ -207,11 +207,11 @@ defmodule PromptOnSDK.ConformanceTest do
     end
   end
 
-  test "generation_record.json: the batch envelope holds exactly the documented records" do
-    doc = load("generation_record.json")
+  test "log_record.json: the batch envelope holds exactly the documented records" do
+    doc = load("log_record.json")
     records = Enum.map(doc["records"], & &1["record"])
 
-    assert doc["batch_envelope"]["request"]["generations"] == records
+    assert doc["batch_envelope"]["request"]["logs"] == records
     assert doc["batch_envelope"]["response_example"]["accepted"] == length(records)
     assert doc["batch_envelope"]["response_on_resend"]["duplicates"] == length(records)
     assert length(records) <= doc["endpoint"]["max_records_per_request"]
@@ -253,7 +253,7 @@ defmodule PromptOnSDK.ConformanceTest do
     }
   end
 
-  defp resolve_expectation(data, use_case, prompt, variables) do
+  defp use_case_expectation(data, use_case, prompt, variables) do
     case Resolver.resolve(data, use_case, prompt: prompt) do
       {:error, :unknown_prompt} ->
         {:ok, prompts} = Resolver.prompt_names(data, use_case)
@@ -261,14 +261,14 @@ defmodule PromptOnSDK.ConformanceTest do
         %{
           "error" => "unknown_prompt",
           "prompt" => prompt || Resolver.default_prompt(),
-          "available_prompts" => prompts
+          "prompt_names" => prompts
         }
 
       {:error, reason} ->
         %{"error" => to_string(reason)}
 
       {:ok, r} ->
-        case render_resolution(r, variables) do
+        case fill_use_case(r, variables) do
           {:error, {:missing_variable, name}} ->
             %{"error" => "missing_variable", "variable" => name}
 
@@ -280,12 +280,12 @@ defmodule PromptOnSDK.ConformanceTest do
               "deployment_id" => r.deployment_id,
               "revision" => r.deployment_revision,
               "prompt" => r.prompt,
-              "prompts" => prompts,
+              "prompt_names" => prompts,
               "model_id" => r.model_id,
               "model" => r.model,
               "provider" => r.provider && to_string(r.provider),
-              "effective_params" => r.effective_params,
-              "effective_provider_options" => r.effective_provider_options,
+              "params" => r.params,
+              "provider_options" => r.provider_options,
               "prompt_version" =>
                 r.prompt_version_id &&
                   %{"id" => r.prompt_version_id, "number" => r.prompt_version_number},
@@ -296,10 +296,10 @@ defmodule PromptOnSDK.ConformanceTest do
     end
   end
 
-  defp render_resolution(%{kind: :chat, messages: messages}, nil) when is_list(messages),
+  defp fill_use_case(%{kind: :chat, messages: messages}, nil) when is_list(messages),
     do: {:ok, %{"messages" => Enum.map(messages, &message_map/1)}}
 
-  defp render_resolution(%{kind: :chat, messages: messages} = r, variables)
+  defp fill_use_case(%{kind: :chat, messages: messages} = r, variables)
        when is_list(messages) do
     case Template.render_messages(messages, variables, engine: r.engine || :liquid) do
       {:ok, rendered} -> {:ok, %{"messages" => Enum.map(rendered, &message_map/1)}}
@@ -307,10 +307,10 @@ defmodule PromptOnSDK.ConformanceTest do
     end
   end
 
-  defp render_resolution(%{kind: :text, text_template: text}, nil) when is_binary(text),
+  defp fill_use_case(%{kind: :text, text_template: text}, nil) when is_binary(text),
     do: {:ok, %{"text" => text}}
 
-  defp render_resolution(%{kind: :text, text_template: text} = r, variables)
+  defp fill_use_case(%{kind: :text, text_template: text} = r, variables)
        when is_binary(text) do
     case Template.render(text, variables, engine: r.engine || :liquid) do
       {:ok, rendered} -> {:ok, %{"text" => rendered}}
@@ -318,7 +318,7 @@ defmodule PromptOnSDK.ConformanceTest do
     end
   end
 
-  defp render_resolution(_r, _variables), do: {:ok, %{}}
+  defp fill_use_case(_r, _variables), do: {:ok, %{}}
 
   defp message_map(m), do: %{"role" => m[:role], "content" => m[:content]}
 

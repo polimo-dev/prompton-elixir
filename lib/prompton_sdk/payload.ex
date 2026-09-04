@@ -1,10 +1,10 @@
 defmodule PromptOnSDK.Payload do
   @moduledoc """
-  Generation payload policy (§5.7, §7.5), applied by the SDK at enqueue time. The server ingest
+  Log content policy (§5.7, §7.5), applied by the SDK at enqueue time. The server ingest
   re-validates it, but the SDK has to apply it first so that the raw text never travels over the
   network ("if the SDK option is more conservative, the SDK wins").
 
-  The input is a **string-keyed** generation map in the §6.4 format; the policy is the snapshot
+  The input is a **string-keyed** log map in the §6.4 format; the policy is the use-case document
   UseCase's `payload_policy` (`%{mode: :full | :hash | :none, sample_rate: float, max_bytes: int}`;
   `config.payload_defaults` when `nil`).
 
@@ -14,7 +14,7 @@ defmodule PromptOnSDK.Payload do
      keep when `bucket(id) < round(sample_rate × 10_000)`, where
      `bucket(id) = first4bytes(sha256(id)) as unsigned big-endian rem 10_000` (deterministic: a
      resend gets the same decision; the same formula as the server's `PayloadPolicy.bucket/1`).
-     When not kept, `input`/`output` are removed (the narrow Generation row always remains).
+     When not kept, `input`/`output` are removed (the narrow log row always remains).
   2. **Object wrapping**: a string `input` is always wrapped as `%{"text" => str}` and a string
      `output` as `%{"content" => str}` (regardless of truncation; the server wraps an incoming
      string the same way).
@@ -57,7 +57,7 @@ defmodule PromptOnSDK.Payload do
         }
 
   @doc """
-  Returns the generation map with the policy applied. `config` is a `PromptOnSDK.Config.t()`
+  Returns the log map with the policy applied. `config` is a `PromptOnSDK.Config.t()`
   (uses `payload_defaults`, `hash_end_user`, `log.redact`).
   """
   @spec apply(map(), policy() | nil, map()) :: map()
@@ -71,7 +71,7 @@ defmodule PromptOnSDK.Payload do
     |> redact(config)
   end
 
-  @doc "Policy normalization (snapshot value ⊕ defaults). `sample_rate` is clamped to 0..1."
+  @doc "Policy normalization (use-case document value ⊕ defaults). `sample_rate` is clamped to 0..1."
   @spec normalize_policy(policy() | nil, map()) :: %{
           mode: atom(),
           sample_rate: float(),
@@ -101,7 +101,7 @@ defmodule PromptOnSDK.Payload do
   defp normalize_max_bytes(_), do: 262_144
 
   @doc """
-  Whether to keep this generation's raw text. Errors/truncations always; otherwise
+  Whether to keep this log's raw text. Errors/truncations always; otherwise
   `bucket(id) < round(rate × 10_000)`.
   """
   @spec keep?(map(), float()) :: boolean()
@@ -299,14 +299,18 @@ defmodule PromptOnSDK.Payload do
       dropped = length(rest) - length(kept_tail)
       [first, Map.put(marker, "content", marker_text(dropped)) | kept_tail]
     else
-      case shrink_first(first) do
-        ^first ->
-          marker = Map.put(marker, "content", marker_text(length(rest) + 1))
-          if list_json_size([marker]) <= limit, do: [marker], else: []
+      drop_middle_after_shrink(first, rest, limit, marker)
+    end
+  end
 
-        smaller ->
-          drop_middle([smaller | rest], limit)
-      end
+  defp drop_middle_after_shrink(first, rest, limit, marker) do
+    case shrink_first(first) do
+      ^first ->
+        marker = Map.put(marker, "content", marker_text(length(rest) + 1))
+        if list_json_size([marker]) <= limit, do: [marker], else: []
+
+      smaller ->
+        drop_middle([smaller | rest], limit)
     end
   end
 

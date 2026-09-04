@@ -11,17 +11,17 @@ defmodule PromptOnSDK.Config do
   | Key | Default | Description |
   |---|---|---|
   | `api_key` | `nil` | `ptn_<project_slug>_…` format (project key). `nil` means disk/bundle only, no remote calls |
-  | `environment` | `"production"` | Environment slug this app reads. The `GET /snapshot?environment=…` query and the disk/bundle guard reference |
+  | `environment` | `"production"` | Environment slug this app reads. The `GET /use-cases?environment=…` query and the disk/bundle guard reference |
   | `base_url` | `nil` | `https://prompton.example/api/v1` (trailing `/` removed) |
   | `poll_interval` | `10_000` | ETag polling interval (ms). Also the minimum for failure backoff |
-  | `disk_cache` | `nil` | Snapshot disk cache path. `nil` disables it |
+  | `disk_cache` | `nil` | Use-case document disk cache path. `nil` disables it |
   | `bundle` | `nil` | `{:file, path}`: the last-resort fallback bundle |
   | `log` | below | `flush_interval: 2_000, flush_size: 100, flush_bytes: 1_000_000, max_buffer: 10_000, redact: nil` |
   | `http` | `[]` | Req options (`receive_timeout: 5_000` by default; tests may inject `plug:`) |
   | `mode` | `:live` | `:live` / `:test` / `:offline` |
   | `hash_end_user` | `false` | When `true`, `end_user_ref` is sent as a sha256 hex |
   | `client` | `PromptOnSDK.Client.Req` | `PromptOnSDK.Client` implementation module (test injection) |
-  | `payload_defaults` | `%{mode: :full, sample_rate: 1.0, max_bytes: 262_144}` | Default payload policy used when the snapshot has none |
+  | `payload_defaults` | `%{mode: :full, sample_rate: 1.0, max_bytes: 262_144}` | Default payload policy used when the use-case document has none |
 
   The environment is decided by **configuration, not the key** (2026-09-01): an ApiKey is per
   project and the environment is a request parameter. `env_slug` is the `environment` value as is

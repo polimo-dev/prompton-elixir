@@ -1,7 +1,7 @@
 defmodule PromptOnSDK.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.2.0"
   @source_url "https://github.com/polimo-dev/prompton-elixir"
 
   def project do
@@ -14,10 +14,10 @@ defmodule PromptOnSDK.MixProject do
       deps: deps(),
       name: "PromptOnSDK",
       description:
-        "PromptOn Elixir SDK — resolve which model/prompt/params to use, render templates, log generations.",
+        "PromptOn Elixir SDK — fetch deployed use cases, render messages/text, and log provider calls.",
       package: package(),
       source_url: @source_url,
-      docs: [main: "readme", extras: ["README.md"]]
+      docs: [main: "readme", extras: ["README.md", "CHANGELOG.md"]]
     ]
   end
 
@@ -45,7 +45,7 @@ defmodule PromptOnSDK.MixProject do
     [
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => @source_url, "Docs" => "https://docs.prompton.ai"},
-      files: ~w(lib mix.exs README.md LICENSE)
+      files: ~w(lib mix.exs README.md CHANGELOG.md LICENSE)
     ]
   end
 end

@@ -8,7 +8,7 @@
 # only field that changes between runs is `generated_from.commit`.
 
 defmodule GenConformance do
-  alias PromptOnSDK.{Payload, Resolver, SnapshotData, StopKind, Template}
+  alias PromptOnSDK.{Payload, Resolver, UseCaseDocument, StopKind, Template}
 
   @out_dir Path.expand("../conformance", __DIR__)
 
@@ -19,10 +19,10 @@ defmodule GenConformance do
     File.mkdir_p!(@out_dir)
 
     write("template.json", template())
-    write("resolve.json", resolve())
+    write("use_case.json", use_case_cases())
     write("truncation.json", truncation())
     write("stop_kind.json", stop_kind())
-    write("generation_record.json", generation_record())
+    write("log_record.json", log_record())
 
     IO.puts("wrote #{@out_dir}")
   end
@@ -250,7 +250,7 @@ defmodule GenConformance do
 
   defp template_case({name, source, vars, opts}) do
     engine = Keyword.get(opts, :engine, "liquid")
-    result = Template.render(source, vars, engine: String.to_atom(engine))
+    result = Template.render(source, vars, engine: String.to_existing_atom(engine))
 
     %{
       "name" => name,
@@ -283,7 +283,7 @@ defmodule GenConformance do
   end
 
   # ==========================================================================
-  # resolve.json
+  # use_case.json
 
   # Fixed ids so the file is byte-stable.
   @uc_greeting "0198f2a1-0000-7000-8000-00000000c001"
@@ -306,16 +306,16 @@ defmodule GenConformance do
   @prompt_greeting "0198f2a1-0000-7000-8000-00000000b001"
   @prompt_summarize "0198f2a1-0000-7000-8000-00000000b002"
 
-  defp resolve do
-    snapshots = %{
-      "production" => production_snapshot(),
-      "staging" => staging_snapshot(),
-      "degraded" => degraded_snapshot()
+  defp use_case_cases do
+    documents = %{
+      "production" => production_document(),
+      "staging" => staging_document(),
+      "degraded" => degraded_document()
     }
 
     decoded =
-      Map.new(snapshots, fn {ref, raw} ->
-        {:ok, data, _warnings} = SnapshotData.decode(raw)
+      Map.new(documents, fn {ref, raw} ->
+        {:ok, data, _warnings} = UseCaseDocument.decode(raw)
         {ref, data}
       end)
 
@@ -353,7 +353,7 @@ defmodule GenConformance do
           ref: "production",
           use_case: "greeting",
           variables: %{},
-          note: "resolution succeeds; rendering fails"
+          note: "use case selection succeeds; rendering fails"
         },
         %{
           name: "chat/unpinned_prompt_name",
@@ -414,63 +414,62 @@ defmodule GenConformance do
           ref: "degraded",
           use_case: "greeting",
           note:
-            "the snapshot references ids it does not contain: resolution still succeeds, with warnings and null fields"
+            "the document references ids it does not contain: use case selection still succeeds, with warnings and null fields"
         }
       ]
-      |> Enum.map(&resolve_case(&1, decoded))
+      |> Enum.map(&use_case_case(&1, decoded))
 
     %{
       "description" =>
-        "Resolution: snapshot + use case (+ prompt name) -> which model, params and prompt " <>
-          "version to use, then rendering when `variables` is present. This is exactly what " <>
-          "POST /api/v1/resolve does on the server.",
+        "Use case selection: use-case document + use case (+ prompt name) -> which model, params " <>
+          "and prompt version to use, then filling when `variables` is present. This is " <>
+          "exactly what POST /api/v1/use-cases/{key}/prompt does on the server.",
       "merge_semantics" => %{
-        "effective_params" =>
-          "use_case.default_params <- deployment.params (shallow, later wins)",
-        "effective_provider_options" =>
+        "params" => "use_case.default_params <- deployment.params (shallow, later wins)",
+        "provider_options" =>
           "model.provider_options <- deployment.provider_options (shallow, later wins)",
         "null_values" => "an override value of null is kept as null, not deleted"
       },
       "default_prompt" => Resolver.default_prompt(),
       "error_categories" => %{
-        "unknown_use_case" => "the snapshot has no use case with that key",
+        "unknown_use_case" => "the document has no use case with that key",
         "unresolved" => "the use case exists but has no deployment in this environment",
         "unknown_prompt" =>
           "the deployment pins no prompt version under that name (no fallback to \"default\")",
         "missing_variable" =>
-          "resolution succeeded but rendering needed a variable that was absent"
+          "use case selection succeeded but rendering needed a variable that was absent"
       },
-      "snapshot_notes" => %{
+      "document_notes" => %{
         "production" =>
-          "The everyday shape: three deployed use cases (chat with two prompt names, text, embedding) plus one use case that has never been deployed. Field for field what GET /snapshot returns.",
+          "The everyday shape: three deployed use cases (chat with two prompt names, text, embedding) plus one use case that has never been deployed. Field for field what GET /use-cases returns.",
         "staging" =>
           "The same project in another environment: one use case, a different revision, different params and only the default prompt pinned.",
         "degraded" =>
-          "Synthetic. The deployment points at a prompt version id and a model id the snapshot does not contain, to pin down the warning path. A healthy server never emits this."
+          "Synthetic. The deployment points at a prompt version id and a model id the document does not contain, to pin down the warning path. A healthy server never emits this."
       },
-      "snapshots" => snapshots,
+      "documents" => documents,
       "cases" => cases
     }
   end
 
-  defp resolve_case(spec, decoded) do
+  defp use_case_case(spec, decoded) do
     data = Map.fetch!(decoded, spec.ref)
     prompt = Map.get(spec, :prompt)
     variables = Map.get(spec, :variables)
 
     %{
       "name" => spec.name,
-      "snapshot_ref" => spec.ref,
+      "document_ref" => spec.ref,
       "environment" => data.environment,
       "use_case" => spec.use_case,
-      "expect" => resolve_expect(data, spec.use_case, prompt, variables)
+      "expect" => use_case_expect(data, spec.use_case, prompt, variables)
     }
     |> maybe_put("prompt", prompt)
     |> maybe_put("variables", variables)
     |> maybe_put("note", Map.get(spec, :note))
   end
 
-  defp resolve_expect(data, use_case, prompt, variables) do
+  defp use_case_expect(data, use_case, prompt, variables) do
     case Resolver.resolve(data, use_case, prompt: prompt) do
       {:error, :unknown_prompt} ->
         {:ok, prompts} = Resolver.prompt_names(data, use_case)
@@ -478,14 +477,14 @@ defmodule GenConformance do
         %{
           "error" => "unknown_prompt",
           "prompt" => prompt || Resolver.default_prompt(),
-          "available_prompts" => prompts
+          "prompt_names" => prompts
         }
 
       {:error, reason} ->
         %{"error" => to_string(reason)}
 
       {:ok, r} ->
-        case render_resolution(r, variables) do
+        case fill_use_case(r, variables) do
           {:error, {:missing_variable, name}} ->
             %{"error" => "missing_variable", "variable" => name}
 
@@ -497,12 +496,12 @@ defmodule GenConformance do
               "deployment_id" => r.deployment_id,
               "revision" => r.deployment_revision,
               "prompt" => r.prompt,
-              "prompts" => prompts,
+              "prompt_names" => prompts,
               "model_id" => r.model_id,
               "model" => r.model,
               "provider" => r.provider && to_string(r.provider),
-              "effective_params" => r.effective_params,
-              "effective_provider_options" => r.effective_provider_options,
+              "params" => r.params,
+              "provider_options" => r.provider_options,
               "prompt_version" =>
                 r.prompt_version_id &&
                   %{"id" => r.prompt_version_id, "number" => r.prompt_version_number},
@@ -513,10 +512,10 @@ defmodule GenConformance do
     end
   end
 
-  defp render_resolution(%{kind: :chat, messages: messages}, nil) when is_list(messages),
+  defp fill_use_case(%{kind: :chat, messages: messages}, nil) when is_list(messages),
     do: {:ok, %{"messages" => Enum.map(messages, &message_map/1)}}
 
-  defp render_resolution(%{kind: :chat, messages: messages} = r, variables)
+  defp fill_use_case(%{kind: :chat, messages: messages} = r, variables)
        when is_list(messages) do
     case Template.render_messages(messages, variables, engine: r.engine || :liquid) do
       {:ok, rendered} -> {:ok, %{"messages" => Enum.map(rendered, &message_map/1)}}
@@ -524,10 +523,10 @@ defmodule GenConformance do
     end
   end
 
-  defp render_resolution(%{kind: :text, text_template: text}, nil) when is_binary(text),
+  defp fill_use_case(%{kind: :text, text_template: text}, nil) when is_binary(text),
     do: {:ok, %{"text" => text}}
 
-  defp render_resolution(%{kind: :text, text_template: text} = r, variables)
+  defp fill_use_case(%{kind: :text, text_template: text} = r, variables)
        when is_binary(text) do
     case Template.render(text, variables, engine: r.engine || :liquid) do
       {:ok, rendered} -> {:ok, %{"text" => rendered}}
@@ -535,7 +534,7 @@ defmodule GenConformance do
     end
   end
 
-  defp render_resolution(_r, _variables), do: {:ok, %{}}
+  defp fill_use_case(_r, _variables), do: {:ok, %{}}
 
   defp message_map(message) do
     %{
@@ -554,9 +553,9 @@ defmodule GenConformance do
     }
   end
 
-  defp production_snapshot do
+  defp production_document do
     %{
-      "schema_version" => 3,
+      "schema_version" => 4,
       "project" => "sdkfixture",
       "environment" => "production",
       "use_cases" => %{
@@ -673,9 +672,9 @@ defmodule GenConformance do
     }
   end
 
-  defp staging_snapshot do
+  defp staging_document do
     %{
-      "schema_version" => 3,
+      "schema_version" => 4,
       "project" => "sdkfixture",
       "environment" => "staging",
       "use_cases" => %{
@@ -725,9 +724,9 @@ defmodule GenConformance do
     }
   end
 
-  defp degraded_snapshot do
+  defp degraded_document do
     %{
-      "schema_version" => 3,
+      "schema_version" => 4,
       "project" => "sdkfixture",
       "environment" => "production",
       "use_cases" => %{
@@ -773,7 +772,7 @@ defmodule GenConformance do
         %{
           name: "passthrough/small_payload_is_untouched",
           policy: %{mode: :full, max_bytes: 512},
-          generation: %{
+          log: %{
             "id" => "0198f2a1-0000-7000-8000-000000001001",
             "use_case" => "greeting",
             "status" => "ok",
@@ -787,7 +786,7 @@ defmodule GenConformance do
         %{
           name: "wrapping/string_input_and_output_become_objects",
           policy: %{mode: :full, max_bytes: 512},
-          generation: %{
+          log: %{
             "id" => "0198f2a1-0000-7000-8000-000000001002",
             "status" => "ok",
             "input" => "raw prompt text",
@@ -798,7 +797,7 @@ defmodule GenConformance do
         %{
           name: "truncate/single_message_content_over_max_bytes_div_8",
           policy: %{mode: :full, max_bytes: 512},
-          generation: %{
+          log: %{
             "id" => "0198f2a1-0000-7000-8000-000000001003",
             "status" => "ok",
             "input" => %{"messages" => [%{"role" => "user", "content" => long}]}
@@ -808,7 +807,7 @@ defmodule GenConformance do
         %{
           name: "truncate/input_text_over_max_bytes",
           policy: %{mode: :full, max_bytes: 128},
-          generation: %{
+          log: %{
             "id" => "0198f2a1-0000-7000-8000-000000001004",
             "status" => "ok",
             "input" => %{"text" => long}
@@ -818,7 +817,7 @@ defmodule GenConformance do
         %{
           name: "truncate/variables_over_max_bytes_div_4_are_replaced_by_a_digest",
           policy: %{mode: :full, max_bytes: 256},
-          generation: %{
+          log: %{
             "id" => "0198f2a1-0000-7000-8000-000000001005",
             "status" => "ok",
             "input" => %{"variables" => %{"blob" => long}}
@@ -829,7 +828,7 @@ defmodule GenConformance do
         %{
           name: "truncate/output_content_over_max_bytes_div_4",
           policy: %{mode: :full, max_bytes: 512},
-          generation: %{
+          log: %{
             "id" => "0198f2a1-0000-7000-8000-000000001006",
             "status" => "ok",
             "output" => %{"content" => long}
@@ -838,7 +837,7 @@ defmodule GenConformance do
         %{
           name: "truncate/output_tool_calls_arguments_are_shrunk",
           policy: %{mode: :full, max_bytes: 1024},
-          generation: %{
+          log: %{
             "id" => "0198f2a1-0000-7000-8000-000000001007",
             "status" => "ok",
             "output" => %{
@@ -858,7 +857,7 @@ defmodule GenConformance do
         %{
           name: "truncate/output_tool_calls_fall_back_to_a_marker",
           policy: %{mode: :full, max_bytes: 512},
-          generation: %{
+          log: %{
             "id" => "0198f2a1-0000-7000-8000-000000001013",
             "status" => "ok",
             "output" => %{
@@ -878,7 +877,7 @@ defmodule GenConformance do
         %{
           name: "truncate/messages_total_over_max_bytes_stubs_the_middle",
           policy: %{mode: :full, max_bytes: 340},
-          generation: %{
+          log: %{
             "id" => "0198f2a1-0000-7000-8000-000000001008",
             "status" => "ok",
             "input" => %{
@@ -897,7 +896,7 @@ defmodule GenConformance do
         %{
           name: "truncate/many_messages_drop_the_middle_entirely",
           policy: %{mode: :full, max_bytes: 192},
-          generation: %{
+          log: %{
             "id" => "0198f2a1-0000-7000-8000-000000001009",
             "status" => "ok",
             "input" => %{
@@ -914,7 +913,7 @@ defmodule GenConformance do
         %{
           name: "truncate/utf8_boundary_is_never_split",
           policy: %{mode: :full, max_bytes: 512},
-          generation: %{
+          log: %{
             "id" => "0198f2a1-0000-7000-8000-00000000100a",
             "status" => "ok",
             "input" => %{"messages" => [%{"role" => "user", "content" => korean}]},
@@ -926,7 +925,7 @@ defmodule GenConformance do
         %{
           name: "truncate/error_message_over_2048_bytes",
           policy: %{mode: :full, max_bytes: 262_144},
-          generation: %{
+          log: %{
             "id" => "0198f2a1-0000-7000-8000-00000000100b",
             "status" => "error",
             "error" => %{
@@ -940,7 +939,7 @@ defmodule GenConformance do
         %{
           name: "mode/hash_replaces_input_and_output_with_digests",
           policy: %{mode: :hash, max_bytes: 262_144},
-          generation: %{
+          log: %{
             "id" => "0198f2a1-0000-7000-8000-00000000100c",
             "status" => "ok",
             "input" => %{"messages" => [%{"role" => "user", "content" => "hi"}]},
@@ -952,7 +951,7 @@ defmodule GenConformance do
         %{
           name: "mode/hash_of_a_string_payload_hashes_the_wrapped_object",
           policy: %{mode: :hash, max_bytes: 262_144},
-          generation: %{
+          log: %{
             "id" => "0198f2a1-0000-7000-8000-00000000100d",
             "status" => "ok",
             "input" => "raw prompt text",
@@ -963,7 +962,7 @@ defmodule GenConformance do
         %{
           name: "mode/none_drops_input_and_output",
           policy: %{mode: :none, max_bytes: 262_144},
-          generation: %{
+          log: %{
             "id" => "0198f2a1-0000-7000-8000-00000000100e",
             "status" => "ok",
             "input" => %{"messages" => [%{"role" => "user", "content" => "hi"}]},
@@ -973,7 +972,7 @@ defmodule GenConformance do
         %{
           name: "sampling/rate_zero_drops_a_successful_record",
           policy: %{mode: :full, sample_rate: 0.0, max_bytes: 262_144},
-          generation: %{
+          log: %{
             "id" => "0198f2a1-0000-7000-8000-00000000100f",
             "status" => "ok",
             "stop_kind" => "stop",
@@ -984,7 +983,7 @@ defmodule GenConformance do
         %{
           name: "sampling/errors_are_always_kept",
           policy: %{mode: :full, sample_rate: 0.0, max_bytes: 262_144},
-          generation: %{
+          log: %{
             "id" => "0198f2a1-0000-7000-8000-000000001010",
             "status" => "error",
             "input" => %{"text" => "hi"},
@@ -994,7 +993,7 @@ defmodule GenConformance do
         %{
           name: "sampling/length_truncations_are_always_kept",
           policy: %{mode: :full, sample_rate: 0.0, max_bytes: 262_144},
-          generation: %{
+          log: %{
             "id" => "0198f2a1-0000-7000-8000-000000001011",
             "status" => "ok",
             "stop_kind" => "length",
@@ -1005,13 +1004,13 @@ defmodule GenConformance do
       ]
       |> Enum.map(fn spec ->
         policy = spec.policy
-        expected = Payload.apply(spec.generation, policy, config)
+        expected = Payload.apply(spec.log, policy, config)
 
         %{
           "name" => spec.name,
           "policy" => policy_json(policy),
-          "generation" => spec.generation,
-          "expect" => %{"generation" => expected}
+          "log" => spec.log,
+          "expect" => %{"log" => expected}
         }
         |> maybe_put("note", Map.get(spec, :note))
       end)
@@ -1020,13 +1019,13 @@ defmodule GenConformance do
       "name" => "end_user_ref/hashed_when_hash_end_user_is_set",
       "policy" => policy_json(%{mode: :full, max_bytes: 262_144}),
       "config" => %{"hash_end_user" => true},
-      "generation" => %{
+      "log" => %{
         "id" => "0198f2a1-0000-7000-8000-000000001012",
         "status" => "ok",
         "end_user_ref" => "user-42"
       },
       "expect" => %{
-        "generation" =>
+        "log" =>
           Payload.apply(
             %{
               "id" => "0198f2a1-0000-7000-8000-000000001012",
@@ -1053,7 +1052,7 @@ defmodule GenConformance do
     %{
       "description" =>
         "Monitoring-log payload policy applied by the SDK before a record is enqueued. Run " <>
-          "apply(generation, policy, config) and compare with expect.generation.",
+          "apply(log, policy, config) and compare with expect.log.",
       "order_of_operations" => [
         "keep decision (sampling; errors and stop_kind=length are always kept)",
         "wrap a string input as {\"text\": …} and a string output as {\"content\": …}",
@@ -1206,10 +1205,10 @@ defmodule GenConformance do
   end
 
   # ==========================================================================
-  # generation_record.json
+  # log_record.json
 
-  defp generation_record do
-    resolution_chat = %PromptOnSDK.Resolution{
+  defp log_record do
+    use_case_chat = %PromptOnSDK.Resolution{
       use_case_key: "greeting",
       kind: :chat,
       prompt: "default",
@@ -1221,12 +1220,12 @@ defmodule GenConformance do
       model_id: @model_chat,
       model: "openai/gpt-4o-mini",
       provider: :openrouter,
-      effective_params: %{"temperature" => 0.2, "max_tokens" => 512},
-      effective_provider_options: %{"only" => ["OpenAI"], "allow_fallbacks" => true},
+      params: %{"temperature" => 0.2, "max_tokens" => 512},
+      provider_options: %{"only" => ["OpenAI"], "allow_fallbacks" => true},
       source: :remote
     }
 
-    resolution_embed = %PromptOnSDK.Resolution{
+    use_case_embed = %PromptOnSDK.Resolution{
       use_case_key: "embed",
       kind: :embedding,
       prompt: nil,
@@ -1235,8 +1234,8 @@ defmodule GenConformance do
       model_id: @model_embed,
       model: "openai/text-embedding-3-small",
       provider: :openrouter,
-      effective_params: %{"dimensions" => 256},
-      effective_provider_options: %{},
+      params: %{"dimensions" => 256},
+      provider_options: %{},
       source: :disk
     }
 
@@ -1248,11 +1247,11 @@ defmodule GenConformance do
     records = [
       %{
         "name" => "chat/success",
-        "built_by" => "PromptOnSDK.with_generation/3",
-        "description" => "A complete successful chat generation with usage, cost and output.",
+        "built_by" => "PromptOnSDK.track/3",
+        "description" => "A complete successful chat log with usage, cost and output.",
         "record" =>
           build_record(
-            resolution_chat,
+            use_case_chat,
             %{
               id: "0198f2a1-1111-7000-8000-000000000001",
               trace_id: "oban:8842",
@@ -1284,12 +1283,12 @@ defmodule GenConformance do
       },
       %{
         "name" => "chat/error_without_output",
-        "built_by" => "PromptOnSDK.with_generation/3",
+        "built_by" => "PromptOnSDK.track/3",
         "description" =>
           "The provider call failed. status is error, there is no output or usage, and error.kind is one of the seven canonical kinds.",
         "record" =>
           build_record(
-            resolution_chat,
+            use_case_chat,
             %{
               id: "0198f2a1-1111-7000-8000-000000000002",
               trace_id: "oban:8843",
@@ -1305,12 +1304,12 @@ defmodule GenConformance do
       },
       %{
         "name" => "chat/error_with_usage_preserved",
-        "built_by" => "PromptOnSDK.with_generation/3",
+        "built_by" => "PromptOnSDK.track/3",
         "description" =>
           "The provider answered but the app could not parse the answer. status is error and the usage and output are still recorded, so the call still counts as spend and as a quality signal.",
         "record" =>
           build_record(
-            resolution_chat,
+            use_case_chat,
             %{
               id: "0198f2a1-1111-7000-8000-000000000003",
               trace_id: "oban:8844",
@@ -1331,12 +1330,12 @@ defmodule GenConformance do
       },
       %{
         "name" => "embedding/success",
-        "built_by" => "PromptOnSDK.with_generation/3",
+        "built_by" => "PromptOnSDK.track/3",
         "description" =>
-          "An embedding generation: kind is embedding, there is no prompt or prompt_version_id, the input is text and only input_tokens are reported. resolution_source records that the snapshot came from the disk cache.",
+          "An embedding log: kind is embedding, there is no prompt or prompt_version_id, the input is text and only input_tokens are reported. source records that the use-case document came from the disk cache.",
         "record" =>
           build_record(
-            resolution_embed,
+            use_case_embed,
             %{
               id: "0198f2a1-1111-7000-8000-000000000004",
               trace_id: "ingest:2026-09-04:batch-7",
@@ -1365,11 +1364,11 @@ defmodule GenConformance do
 
     %{
       "description" =>
-        "Complete monitoring-log records in the shape POST /api/v1/generations accepts, plus the " <>
+        "Complete monitoring-log records in the shape POST /api/v1/logs accepts, plus the " <>
           "batch envelope and the server's validation rules.",
       "endpoint" => %{
         "method" => "POST",
-        "path" => "/api/v1/generations",
+        "path" => "/api/v1/logs",
         "query" => %{
           "environment" => "production (default; a request parameter, not a key property)"
         },
@@ -1382,7 +1381,7 @@ defmodule GenConformance do
         "success_status" => 202
       },
       "batch_envelope" => %{
-        "request" => %{"generations" => Enum.map(records, & &1["record"])},
+        "request" => %{"logs" => Enum.map(records, & &1["record"])},
         "response_example" => %{
           "accepted" => length(records),
           "duplicates" => 0,
@@ -1418,7 +1417,7 @@ defmodule GenConformance do
         "stop_kind" =>
           "stop | length | tool_call | content_filter | other; derived from finish_reason when absent",
         "error.kind" => "http_4xx | http_5xx | rate_limited | timeout | transport | parse | app",
-        "resolution_source" => "remote | disk | bundle | manual",
+        "source" => "remote | disk | bundle | manual",
         "usage.cost_source" => "provider | catalog | unknown",
         "soft_references" =>
           "deployment_id, prompt_version_id and model_id must be a UUID or absent; they are not foreign keys, so a record survives the deletion of what it points at",
@@ -1445,7 +1444,7 @@ defmodule GenConformance do
       "prompt" => "default",
       "prompt_version_id" => @pv_summarize,
       "model_id" => @model_chat,
-      "resolution_source" => "bundle",
+      "source" => "bundle",
       "input" => %{
         "text" => "Summarize the following notes in one paragraph.\n- alpha\n- beta\n"
       },
@@ -1458,21 +1457,21 @@ defmodule GenConformance do
     }
   end
 
-  defp build_record(resolution, meta, status, outcome, error, latency_ms) do
+  defp build_record(use_case, meta, status, provider_result, error, latency_ms) do
     started_at = ~U[2026-09-04 09:00:00.000000Z]
 
-    resolution
+    use_case
     |> PromptOnSDK.Generation.build(
       meta,
       meta.id,
       started_at,
       System.monotonic_time(),
       status,
-      outcome,
+      provider_result,
       error
     )
     # The wall-clock latency of the generator run is replaced by a fixed value so the file is
-    # byte-stable; everything else is what Generation.build/8 produced.
+    # byte-stable; everything else is what the internal log builder produced.
     |> Map.put("latency_ms", latency_ms)
   end
 

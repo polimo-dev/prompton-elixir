@@ -3,33 +3,33 @@ defmodule PromptOnSDK.APITest do
 
   import PromptOnSDK.Test, only: [assert_logged: 1, assert_logged: 2, assert_feedback: 1]
 
-  alias PromptOnSDK.{Generic, OpenRouter, Resolution}
+  alias PromptOnSDK.{Result, UseCase}
 
-  @gen_start [:prompton, :generation, :start]
-  @gen_stop [:prompton, :generation, :stop]
-  @gen_exception [:prompton, :generation, :exception]
-  @resolve_stop [:prompton, :resolve, :stop]
+  @gen_start [:prompton, :log, :start]
+  @gen_stop [:prompton, :log, :stop]
+  @gen_exception [:prompton, :log, :exception]
+  @use_case_stop [:prompton, :use_case, :stop]
 
   # Test mode without a supervisor: only the app env is set (same conditions as HeyDiary's tests)
   setup do
     Application.put_env(:prompton_sdk, :mode, :test)
-    PromptOnSDK.Test.put_snapshot(Fixtures.snapshot())
+    PromptOnSDK.Test.put_use_case_document(Fixtures.snapshot())
     on_exit(&PromptOnSDK.Test.clear/0)
     :ok
   end
 
-  describe "resolve wrappers" do
-    test "resolve sets source/etag from the store and emits telemetry" do
-      attach_telemetry([@resolve_stop])
+  describe "use_case wrappers" do
+    test "use_case sets source/etag from the store and emits telemetry" do
+      attach_telemetry([@use_case_stop])
 
-      assert {:ok, %Resolution{} = r} = PromptOnSDK.resolve(:diary_generation, prompt: "ko")
+      assert {:ok, %UseCase{} = r} = PromptOnSDK.use_case(:diary_generation, prompt: "ko")
 
       assert r.source == :manual
       assert r.etag == "test"
       assert r.prompt == "ko"
-      assert r.prompt_version_id == Fixtures.id(:pv_ko)
+      assert r.prompt_version.id == Fixtures.id(:pv_ko)
 
-      assert_receive {:telemetry, @resolve_stop, %{duration: _},
+      assert_receive {:telemetry, @use_case_stop, %{duration: _},
                       %{
                         use_case: "diary_generation",
                         source: :manual,
@@ -38,13 +38,13 @@ defmodule PromptOnSDK.APITest do
                       }}
     end
 
-    test "resolve errors pass through" do
-      assert PromptOnSDK.resolve("nope") == {:error, :unknown_use_case}
-      assert PromptOnSDK.resolve("transcript_revision") == {:error, :unresolved}
-      assert PromptOnSDK.resolve("diary_generation", prompt: "ja") == {:error, :unknown_prompt}
+    test "use_case errors pass through" do
+      assert PromptOnSDK.use_case("nope") == {:error, :unknown_use_case}
+      assert PromptOnSDK.use_case("transcript_revision") == {:error, :unresolved}
+      assert PromptOnSDK.use_case("diary_generation", prompt: "ja") == {:error, :unknown_prompt}
 
       PromptOnSDK.Test.clear()
-      assert PromptOnSDK.resolve("diary_generation") == {:error, :not_ready}
+      assert PromptOnSDK.use_case("diary_generation") == {:error, :not_ready}
     end
 
     test "prompt_names/1 lists what the live deployment pins" do
@@ -56,36 +56,63 @@ defmodule PromptOnSDK.APITest do
     end
   end
 
-  describe "render/2" do
+  describe "rendering" do
     test "chat renders messages, text renders string, embedding has no template" do
-      {:ok, r} = PromptOnSDK.resolve("diary_generation")
+      {:ok, r} = PromptOnSDK.use_case("diary_generation")
 
       assert {:ok,
               [
                 %{role: "system", content: "You write diaries from voice transcriptions."},
                 %{role: "user", content: user}
               ]} =
-               PromptOnSDK.render(r, %{transcriptions: ["a", "b"], mode: "fresh"})
+               PromptOnSDK.messages(r, %{transcriptions: ["a", "b"], mode: "fresh"})
 
       assert user =~ "1. a\n\n2. b\n\n"
 
       assert {:error, {:missing_variable, "transcriptions"}} =
-               PromptOnSDK.render(r, %{mode: "fresh"})
+               PromptOnSDK.messages(r, %{mode: "fresh"})
 
-      assert_raise PromptOnSDK.RenderError, fn -> PromptOnSDK.render!(r, %{}) end
+      assert {:error, {:missing_variable, "transcriptions"}} = PromptOnSDK.messages(r, %{})
 
-      {:ok, stt} = PromptOnSDK.resolve("voice_transcription")
-      assert PromptOnSDK.render(stt, %{}) == {:ok, "Hello. Today's diary {{ verbatim }}"}
-      assert PromptOnSDK.render!(stt, nil) =~ "verbatim"
+      {:ok, stt} = PromptOnSDK.use_case("voice_transcription")
+      assert PromptOnSDK.text(stt, %{}) == {:ok, "Hello. Today's diary {{ verbatim }}"}
 
-      {:ok, emb} = PromptOnSDK.resolve("diary_embedding")
-      assert PromptOnSDK.render(emb, %{}) == {:error, :no_template}
+      {:ok, emb} = PromptOnSDK.use_case("diary_embedding")
+      assert PromptOnSDK.messages(emb, %{}) == {:error, :wrong_kind}
+    end
+
+    test "messages/3 and text/3 accept prompt: and never silently fall back" do
+      {:ok, r} = PromptOnSDK.use_case("diary_generation")
+
+      assert r.prompt == "default"
+
+      assert {:ok,
+              [
+                %{
+                  role: "system",
+                  content: "You write diaries from voice transcriptions, in Korean."
+                },
+                %{role: "user", content: user}
+              ]} =
+               PromptOnSDK.messages(r, %{transcriptions: ["안녕"], mode: "fresh"}, prompt: "ko")
+
+      assert user =~ "1. 안녕"
+
+      assert {:error, :unknown_prompt} =
+               PromptOnSDK.messages(r, %{transcriptions: ["x"], mode: "fresh"}, prompt: "ja")
+
+      {:ok, stt} = PromptOnSDK.use_case("voice_transcription")
+
+      assert PromptOnSDK.text(stt, %{}, prompt: "default") ==
+               {:ok, "Hello. Today's diary {{ verbatim }}"}
+
+      assert PromptOnSDK.text(stt, %{}, prompt: "ignored") == {:error, :unknown_prompt}
     end
   end
 
-  describe "with_generation/3 (test mode → caller mailbox)" do
+  describe "track/3 (test mode → caller mailbox)" do
     setup do
-      {:ok, r} = PromptOnSDK.resolve("diary_generation", prompt: "ko")
+      {:ok, r} = PromptOnSDK.use_case("diary_generation", prompt: "ko")
       %{r: r}
     end
 
@@ -101,12 +128,12 @@ defmodule PromptOnSDK.APITest do
       }
     }
 
-    test "{:ok, outcome} → status ok with usage/output, returns fun value", %{r: r} do
+    test "{:ok, result} → status ok with usage/output, returns fun value", %{r: r} do
       attach_telemetry([@gen_start, @gen_stop])
       msgs = [%{"role" => "user", "content" => "hi"}]
 
       result =
-        PromptOnSDK.with_generation(
+        PromptOnSDK.track(
           r,
           %{
             id: "gen-fixed",
@@ -121,11 +148,11 @@ defmodule PromptOnSDK.APITest do
           },
           fn ->
             Process.sleep(5)
-            {:ok, %{OpenRouter.outcome(@or_resp) | result: :parsed}}
+            {:ok, %{Result.from_openai(@or_resp) | result: :parsed}}
           end
         )
 
-      assert result == {:ok, %{OpenRouter.outcome(@or_resp) | result: :parsed}}
+      assert result == {:ok, %{Result.from_openai(@or_resp) | result: :parsed}}
       gen = assert_logged(%{"id" => "gen-fixed"})
 
       assert gen["use_case"] == "diary_generation"
@@ -136,7 +163,7 @@ defmodule PromptOnSDK.APITest do
       refute Map.has_key?(gen, "target_id")
       refute Map.has_key?(gen, "rule_id")
       refute Map.has_key?(gen, "variant_id")
-      assert gen["resolution_source"] == "manual"
+      assert gen["source"] == "manual"
       assert gen["context"] == %{"language" => "ko", "plan" => "pro"}
       assert gen["kind"] == "chat"
       assert gen["model"] == "anthropic/claude-sonnet-4"
@@ -171,9 +198,74 @@ defmodule PromptOnSDK.APITest do
                       %{status: :ok, stop_kind: "stop"}}
     end
 
+    test "track/3 can derive the same named prompt as messages/3 from prompt meta" do
+      {:ok, default_use_case} = PromptOnSDK.use_case("diary_generation")
+
+      assert {:ok, [%{content: "You write diaries from voice transcriptions, in Korean."}, _]} =
+               PromptOnSDK.messages(
+                 default_use_case,
+                 %{transcriptions: ["a"], mode: "fresh"},
+                 prompt: "ko"
+               )
+
+      assert {:ok, _result} =
+               PromptOnSDK.track(default_use_case, %{id: "ko-derived", prompt: "ko"}, fn ->
+                 {:ok, Result.from_openai(@or_resp)}
+               end)
+
+      gen = assert_logged(%{"id" => "ko-derived"})
+      assert gen["prompt"] == "ko"
+      assert gen["prompt_version_id"] == Fixtures.id(:pv_ko)
+
+      refute get_in(gen, ["metadata", "prompt"])
+
+      assert {:error, :unknown_prompt} =
+               PromptOnSDK.track(default_use_case, %{prompt: "ja"}, fn -> :not_called end)
+    end
+
+    test "track/3 consumes the prompt selected by messages/3 and does not leak it", %{r: r} do
+      {:ok, default_use_case} = PromptOnSDK.use_case("diary_generation")
+
+      assert {:ok, msgs} =
+               PromptOnSDK.messages(
+                 default_use_case,
+                 %{transcriptions: ["a"], mode: "fresh"},
+                 prompt: "ko"
+               )
+
+      assert {:ok, _result} =
+               PromptOnSDK.track(
+                 default_use_case,
+                 %{id: "ko-auto", input_messages: msgs},
+                 fn -> {:ok, Result.from_openai(@or_resp)} end
+               )
+
+      gen = assert_logged(%{"id" => "ko-auto"})
+      assert gen["prompt"] == "ko"
+      assert gen["prompt_version_id"] == Fixtures.id(:pv_ko)
+
+      assert {:ok, _result} =
+               PromptOnSDK.track(r, %{id: "default-after-ko"}, fn ->
+                 {:ok, Result.from_openai(@or_resp)}
+               end)
+
+      gen = assert_logged(%{"id" => "default-after-ko"})
+      assert gen["prompt"] == "ko"
+      assert gen["prompt_version_id"] == Fixtures.id(:pv_ko)
+
+      assert {:ok, _result} =
+               PromptOnSDK.track(default_use_case, %{id: "default-after-consume"}, fn ->
+                 {:ok, Result.from_openai(@or_resp)}
+               end)
+
+      gen = assert_logged(%{"id" => "default-after-consume"})
+      assert gen["prompt"] == "default"
+      assert gen["prompt_version_id"] == Fixtures.id(:pv_en)
+    end
+
     test "{:error, error} → status error, error kind normalized", %{r: r} do
       result =
-        PromptOnSDK.with_generation(r, %{}, fn ->
+        PromptOnSDK.track(r, %{}, fn ->
           {:error, %{kind: :http_5xx, status: 502, message: "bad gateway"}}
         end)
 
@@ -184,7 +276,7 @@ defmodule PromptOnSDK.APITest do
       assert gen["usage"]["cost_source"] == "unknown"
       assert gen["id"] =~ ~r/^[0-9a-f-]{36}$/
 
-      PromptOnSDK.with_generation(r, %{}, fn ->
+      PromptOnSDK.track(r, %{}, fn ->
         {:error, %{"kind" => "weird", "message" => %{a: 1}}}
       end)
 
@@ -193,7 +285,7 @@ defmodule PromptOnSDK.APITest do
       assert gen["error"]["message"] =~ "a: 1"
     end
 
-    test "OpenRouter tool_calls outcome keeps stop_kind tool_call end-to-end", %{r: r} do
+    test "Result.from_openai tool_calls result keeps stop_kind tool_call end-to-end", %{r: r} do
       resp =
         @or_resp
         |> put_in(["choices", Access.at(0), "finish_reason"], "tool_calls")
@@ -202,30 +294,30 @@ defmodule PromptOnSDK.APITest do
           "tool_calls" => [%{"id" => "c1", "function" => %{"name" => "f", "arguments" => "{}"}}]
         })
 
-      outcome = OpenRouter.outcome(resp)
-      assert outcome.stop_kind == :tool_call
+      provider_result = Result.from_openai(resp)
+      assert provider_result.stop_kind == :tool_call
 
-      PromptOnSDK.with_generation(r, %{id: "gen-tool"}, fn -> {:ok, outcome} end)
+      PromptOnSDK.track(r, %{id: "gen-tool"}, fn -> {:ok, provider_result} end)
 
       gen = assert_logged(%{"id" => "gen-tool"})
       assert gen["finish_reason"] == "tool_calls"
       assert gen["stop_kind"] == "tool_call"
       assert [%{"id" => "c1"}] = gen["output"]["tool_calls"]
 
-      # A string-keyed outcome (stop_kind already normalized) passes through as-is too
-      PromptOnSDK.with_generation(r, %{id: "gen-tool-2"}, fn ->
+      # A string-keyed result map (stop_kind already normalized) passes through as-is too.
+      PromptOnSDK.track(r, %{id: "gen-tool-2"}, fn ->
         {:ok, %{"content" => "x", "stop_kind" => "tool_call", "finish_reason" => "tool_calls"}}
       end)
 
       assert assert_logged(%{"id" => "gen-tool-2"})["stop_kind"] == "tool_call"
     end
 
-    test "{:error, error, outcome} keeps usage/output (parse failure as quality signal)", %{r: r} do
-      outcome =
-        OpenRouter.outcome(put_in(@or_resp, ["choices", Access.at(0), "finish_reason"], "length"))
+    test "{:error, error, result} keeps usage/output (parse failure as quality signal)", %{r: r} do
+      provider_result =
+        Result.from_openai(put_in(@or_resp, ["choices", Access.at(0), "finish_reason"], "length"))
 
-      PromptOnSDK.with_generation(r, %{metadata: %{attempt: 3, final_attempt: true}}, fn ->
-        {:error, %{kind: :app, message: "truncated after 3 attempts"}, outcome}
+      PromptOnSDK.track(r, %{metadata: %{attempt: 3, final_attempt: true}}, fn ->
+        {:error, %{kind: :app, message: "truncated after 3 attempts"}, provider_result}
       end)
 
       gen = assert_logged(%{"status" => "error"})
@@ -240,7 +332,7 @@ defmodule PromptOnSDK.APITest do
       attach_telemetry([@gen_exception])
 
       assert_raise RuntimeError, "boom", fn ->
-        PromptOnSDK.with_generation(r, %{trace_id: "t"}, fn -> raise "boom" end)
+        PromptOnSDK.track(r, %{trace_id: "t"}, fn -> raise "boom" end)
       end
 
       gen = assert_logged(%{"status" => "error", "trace_id" => "t"})
@@ -250,26 +342,26 @@ defmodule PromptOnSDK.APITest do
       assert_receive {:telemetry, @gen_exception, %{duration: _},
                       %{kind: :error, reason: %RuntimeError{}}}
 
-      assert catch_throw(PromptOnSDK.with_generation(r, %{}, fn -> throw(:ball) end)) == :ball
+      assert catch_throw(PromptOnSDK.track(r, %{}, fn -> throw(:ball) end)) == :ball
       assert_logged(%{"status" => "error"})
 
-      assert catch_exit(PromptOnSDK.with_generation(r, %{}, fn -> exit(:bye) end)) == :bye
+      assert catch_exit(PromptOnSDK.track(r, %{}, fn -> exit(:bye) end)) == :bye
       assert_logged(%{"status" => "error"})
     end
 
     test "non-tuple return is status ok without usage", %{r: r} do
-      assert PromptOnSDK.with_generation(r, %{}, fn -> :whatever end) == :whatever
+      assert PromptOnSDK.track(r, %{}, fn -> :whatever end) == :whatever
       gen = assert_logged(%{"status" => "ok"})
       refute Map.has_key?(gen, "output")
       refute Map.has_key?(gen, "stop_kind")
     end
 
-    test "Generic outcome and string-key meta/outcome are accepted", %{r: r} do
-      {:ok, stt} = PromptOnSDK.resolve("voice_transcription")
+    test "Result.from_generic and string-key meta/result maps are accepted", %{r: r} do
+      {:ok, stt} = PromptOnSDK.use_case("voice_transcription")
 
-      PromptOnSDK.with_generation(stt, %{"trace_id" => "g", "end_user_ref" => 42}, fn ->
+      PromptOnSDK.track(stt, %{"trace_id" => "g", "end_user_ref" => 42}, fn ->
         {:ok,
-         Generic.outcome(%{
+         Result.from_generic(%{
            input_tokens: 10,
            output_tokens: 0,
            content: "text",
@@ -283,11 +375,11 @@ defmodule PromptOnSDK.APITest do
       assert gen["end_user_ref"] == "42"
       assert gen["usage"]["input_tokens"] == 10
 
-      # The voice_transcription policy is :hash (sample 0.1, but truncated generations are always
+      # The voice_transcription policy is :hash (sample 0.1, but truncated logs are always
       # kept), so a hash is stored instead of the raw text
       assert %{"sha256" => _, "bytes" => _} = gen["output"]
 
-      PromptOnSDK.with_generation(r, %{}, fn ->
+      PromptOnSDK.track(r, %{}, fn ->
         {:ok, %{"content" => "c", "usage" => %{"input_tokens" => 1}}}
       end)
 
@@ -296,10 +388,10 @@ defmodule PromptOnSDK.APITest do
       assert gen["usage"]["input_tokens"] == 1
     end
 
-    test "payload policy from the resolution is applied (embedding = none)", %{r: _} do
-      {:ok, emb} = PromptOnSDK.resolve("diary_embedding")
+    test "payload policy from the use case is applied (embedding = none)", %{r: _} do
+      {:ok, emb} = PromptOnSDK.use_case("diary_embedding")
 
-      PromptOnSDK.with_generation(
+      PromptOnSDK.track(
         emb,
         %{input_messages: [%{"role" => "user", "content" => "secret"}]},
         fn ->
@@ -315,7 +407,7 @@ defmodule PromptOnSDK.APITest do
   end
 
   describe "log/1 and feedback/1" do
-    test "log/1 fills id/started_at/sdk, applies snapshot policy by use_case, stringifies keys" do
+    test "log/1 fills id/started_at/sdk, applies use-case policy by key, stringifies keys" do
       # The voice_transcription policy is :hash + sample_rate 0.1; errors are always kept, so a
       # hash remains
       assert :ok =
@@ -353,16 +445,16 @@ defmodule PromptOnSDK.APITest do
       assert :ok = PromptOnSDK.log(:not_a_map)
     end
 
-    test "feedback/1 requires generation_id and kind, hashes end_user_ref when configured" do
+    test "feedback/1 requires log_id and kind, hashes end_user_ref when configured" do
       assert :ok =
                PromptOnSDK.feedback(%{
-                 generation_id: "g1",
+                 log_id: "g1",
                  kind: "thumbs",
                  value: 1,
                  end_user_ref: "u"
                })
 
-      fb = assert_feedback(%{"generation_id" => "g1"})
+      fb = assert_feedback(%{"log_id" => "g1"})
       assert fb["kind"] == "thumbs" and fb["end_user_ref"] == "u"
       assert {:ok, _, _} = DateTime.from_iso8601(fb["occurred_at"])
 
@@ -372,14 +464,14 @@ defmodule PromptOnSDK.APITest do
       Application.put_env(:prompton_sdk, :hash_end_user, true)
 
       PromptOnSDK.feedback(%{
-        generation_id: "g2",
+        log_id: "g2",
         kind: "score",
         evaluator: "mood",
         value: 1.0,
         end_user_ref: "u"
       })
 
-      fb = assert_feedback(%{"generation_id" => "g2"})
+      fb = assert_feedback(%{"log_id" => "g2"})
       assert fb["end_user_ref"] == PromptOnSDK.Payload.sha256_hex("u")
     end
   end
@@ -398,33 +490,32 @@ defmodule PromptOnSDK.APITest do
       assert length(Regex.scan(~r/Buffer is not running/, log)) == 1
       assert_receive {:telemetry, [:prompton, :log, :dropped], %{count: 1}, %{reason: :no_buffer}}
       assert_receive {:telemetry, [:prompton, :log, :dropped], %{count: 1}, %{reason: :no_buffer}}
-      refute_receive {:prompton_generation, _}, 10
+      refute_receive {:prompton_log, _}, 10
     end
   end
 
   describe "live mode end-to-end through the buffer" do
-    test "with_generation → Buffer → client.post_generations" do
+    test "track → Buffer → client.post_logs" do
       Application.delete_env(:prompton_sdk, :mode)
       FakeClient.notify(self())
-      FakeClient.set(:fetch_snapshot, fn _, _ -> {:error, :offline} end)
-      FakeClient.set(:post_generations, fn _ -> ok_202(1) end)
-      bundle = tmp_path("bundle.json")
+      FakeClient.set(:fetch_use_cases, fn _, _ -> {:error, :offline} end)
+      FakeClient.set(:post_logs, fn _ -> ok_202(1) end)
+      bundle = tmp_path("use-cases.production.json")
       write_snapshot_file(bundle, Fixtures.snapshot())
       start_sdk(bundle: {:file, bundle}, log: [flush_size: 1, flush_interval: 60_000])
 
-      {:ok, r} = PromptOnSDK.resolve("diary_generation", %{language: "ko", plan: "pro"})
-      PromptOnSDK.with_generation(r, %{id: "e2e"}, fn -> {:ok, OpenRouter.outcome(@or_resp)} end)
+      {:ok, r} = PromptOnSDK.use_case("diary_generation")
+      PromptOnSDK.track(r, %{id: "e2e"}, fn -> {:ok, Result.from_openai(@or_resp)} end)
 
-      assert_receive {:fake_client, :post_generations,
-                      [[%{"id" => "e2e", "resolution_source" => "bundle"}]]},
+      assert_receive {:fake_client, :post_logs, [[%{"id" => "e2e", "source" => "bundle"}]]},
                      500
 
-      refute_receive {:prompton_generation, _}, 10
+      refute_receive {:prompton_log, _}, 10
     end
   end
 
   describe "PromptOnSDK.Test.stub/2" do
-    test "builds a minimal snapshot per use case and accumulates" do
+    test "builds a minimal use-case document per use case and accumulates" do
       PromptOnSDK.Test.clear()
 
       PromptOnSDK.Test.stub("diary_generation", %{
@@ -446,31 +537,31 @@ defmodule PromptOnSDK.APITest do
         payload_policy: %{mode: "none"}
       )
 
-      {:ok, r} = PromptOnSDK.resolve("diary_generation", %{anything: "goes"})
+      {:ok, r} = PromptOnSDK.use_case("diary_generation", %{anything: "goes"})
       assert r.model == "openai/gpt-5-mini"
       assert r.provider == :openrouter
-      assert r.effective_params == %{"temperature" => 0.2}
-      assert {:ok, [_, %{content: "hello"}]} = PromptOnSDK.render(r, %{text: "hello"})
+      assert r.params == %{"temperature" => 0.2}
+      assert {:ok, [_, %{content: "hello"}]} = PromptOnSDK.messages(r, %{text: "hello"})
 
-      {:ok, stt} = PromptOnSDK.resolve("voice_transcription", %{})
+      {:ok, stt} = PromptOnSDK.use_case("voice_transcription", %{})
       assert stt.provider == :groq and stt.kind == :text
-      assert PromptOnSDK.render(stt, %{}) == {:ok, "hint"}
+      assert PromptOnSDK.text(stt, %{}) == {:ok, "hint"}
 
-      {:ok, emb} = PromptOnSDK.resolve("diary_embedding", %{})
+      {:ok, emb} = PromptOnSDK.use_case("diary_embedding", %{})
       assert emb.kind == :embedding and emb.payload_policy.mode == :none
 
-      PromptOnSDK.with_generation(r, %{}, fn -> {:ok, %{content: "out"}} end)
+      PromptOnSDK.track(r, %{}, fn -> {:ok, %{content: "out"}} end)
       assert_logged(%{"use_case" => "diary_generation", "output" => %{"content" => "out"}}, 100)
       assert PromptOnSDK.Test.logged() == []
     end
 
-    test "put_snapshot from file" do
+    test "put_use_case_document from file" do
       path = tmp_path("snap.json")
       File.write!(path, Jason.encode!(Fixtures.snapshot()))
       PromptOnSDK.Test.clear()
-      PromptOnSDK.Test.put_snapshot({:file, path})
-      assert {:ok, _} = PromptOnSDK.resolve("chat_response", %{})
-      assert_raise ArgumentError, fn -> PromptOnSDK.Test.put_snapshot(%{"nope" => 1}) end
+      PromptOnSDK.Test.put_use_case_document({:file, path})
+      assert {:ok, _} = PromptOnSDK.use_case("chat_response", %{})
+      assert_raise ArgumentError, fn -> PromptOnSDK.Test.put_use_case_document(%{"nope" => 1}) end
     end
   end
 end

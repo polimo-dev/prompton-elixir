@@ -1,42 +1,7 @@
 defmodule PromptOnSDK.Generation do
-  @moduledoc """
-  Implementation of `PromptOnSDK.with_generation/3`: the instrumentation wrapper plus assembly of
-  the §6.4 generation map.
+  @moduledoc false
 
-  ## Contract (§7.4)
-
-      PromptOnSDK.with_generation(%Resolution{} = r, meta, fn -> ... end)
-
-  * `meta` (atom or string keys): `id` (default `PromptOnSDK.generation_id/0`), `end_user_ref`,
-    `trace_id`, `sequence`, `input_messages` (the **final** messages after the app attached its
-    history), `variables` (the variables used for rendering; `render/2` keeps no state, so pass
-    them explicitly), `metadata` (free app keys), `context` (free-form tags; resolution does not
-    look at context, so these are log-only), `params` (the values actually used, layered over
-    effective_params).
-  * Return value of `fun`:
-    * `{:ok, outcome}` → `status "ok"` (+ `stop_kind`, usage, output)
-    * `{:error, error}` → `status "error"`, `error: %{kind, status, message}`
-    * `{:error, error, outcome}` → `status "error"` **with usage/output preserved** (keeps a parse
-      failure as a quality signal)
-    * anything else → `status "ok"`, no usage (returned as is, without a warning)
-    * exception/exit/throw → records `status "error", error.kind "app"`, then **re-raises**
-  * The return value is `fun`'s, unchanged.
-  * `outcome` has the shape of `PromptOnSDK.OpenRouter.outcome/1` /
-    `PromptOnSDK.Generic.outcome/1` (atom keys; string keys are accepted too). `outcome.is_byok`
-    goes into `metadata.is_byok`; `model_used`/`upstream_provider` are carried as top-level fields
-    (§6.4).
-  * `error.kind` is normalized to one of
-    `http_4xx | http_5xx | rate_limited | timeout | transport | parse | app` (`app` when unknown).
-  * Only the resolution evidence present in `%Resolution{}` is carried: `deployment_id` /
-    `deployment_revision` / `prompt` / `prompt_version_id`. Keys whose value is `nil` are omitted
-    entirely.
-
-  Telemetry: `[:prompton, :generation, :start | :stop | :exception]` (`PromptOnSDK.Telemetry`).
-  The log goes through `PromptOnSDK.log/2` (`policy: r.payload_policy`), where the payload policy
-  is applied before it reaches the Buffer.
-  """
-
-  alias PromptOnSDK.{Params, Resolution, StopKind, Telemetry, UUIDv7}
+  alias PromptOnSDK.{Params, Resolution, Result, StopKind, Telemetry, UUIDv7}
 
   @error_kinds ~w(http_4xx http_5xx rate_limited timeout transport parse app)
 
@@ -48,7 +13,7 @@ defmodule PromptOnSDK.Generation do
     started_at = DateTime.utc_now()
     t0 = System.monotonic_time()
 
-    Telemetry.execute(Telemetry.generation_start(), %{system_time: System.system_time()}, %{
+    Telemetry.execute(Telemetry.log_start(), %{system_time: System.system_time()}, %{
       id: id,
       use_case: r.use_case_key,
       prompt: r.prompt,
@@ -61,12 +26,12 @@ defmodule PromptOnSDK.Generation do
 
     try do
       result = fun.()
-      {status, outcome, error} = classify(result)
-      gen = build(r, meta, id, started_at, t0, status, outcome, error)
+      {status, provider_result, error} = classify(result)
+      gen = build(r, meta, id, started_at, t0, status, provider_result, error)
       PromptOnSDK.log(gen, policy: r.payload_policy)
 
       Telemetry.execute(
-        Telemetry.generation_stop(),
+        Telemetry.log_stop(),
         %{
           duration: System.monotonic_time() - t0,
           latency_ms: gen["latency_ms"],
@@ -96,7 +61,7 @@ defmodule PromptOnSDK.Generation do
         PromptOnSDK.log(gen, policy: r.payload_policy)
 
         Telemetry.execute(
-          Telemetry.generation_exception(),
+          Telemetry.log_exception(),
           %{duration: System.monotonic_time() - t0, latency_ms: gen["latency_ms"]},
           %{
             id: id,
@@ -116,9 +81,9 @@ defmodule PromptOnSDK.Generation do
 
   # ---------------------------------------------------------------------------
 
-  defp classify({:ok, outcome}), do: {:ok, outcome, nil}
+  defp classify({:ok, provider_result}), do: {:ok, provider_result, nil}
   defp classify({:error, error}), do: {:error, nil, error}
-  defp classify({:error, error, outcome}), do: {:error, outcome, error}
+  defp classify({:error, error, provider_result}), do: {:error, provider_result, error}
   defp classify(_other), do: {:ok, nil, nil}
 
   @doc false
@@ -132,44 +97,44 @@ defmodule PromptOnSDK.Generation do
           term(),
           term()
         ) :: map()
-  def build(r, meta, id, started_at, t0, status, outcome, error) do
+  def build(r, meta, id, started_at, t0, status, provider_result, error) do
     latency_ms = System.convert_time_unit(System.monotonic_time() - t0, :native, :millisecond)
-    outcome = normalize_outcome(outcome)
-    usage = outcome[:usage] || %{}
+    provider_result = normalize_result(provider_result)
+    usage = provider_result[:usage] || %{}
 
     metadata =
       meta[:metadata]
       |> Params.stringify_keys()
-      |> maybe_put("is_byok", outcome[:is_byok])
+      |> maybe_put("is_byok", provider_result[:is_byok])
 
     %{
       "id" => id,
       "use_case" => r.use_case_key,
-      # Resolution evidence: the deployment revision and the chosen prompt. Keys whose value is
+      # Use-case evidence: the deployment revision and the chosen prompt. Keys whose value is
       # nil are dropped entirely below.
       "deployment_id" => r.deployment_id,
       "deployment_revision" => r.deployment_revision,
       "prompt" => r.prompt,
       "prompt_version_id" => r.prompt_version_id,
-      "resolution_source" => to_str(r.source),
+      "source" => to_str(r.source),
       "context" => Params.stringify_keys(meta[:context] || %{}),
       "kind" => to_str(r.kind),
       "model" => r.model,
-      "model_used" => outcome[:model_used],
+      "model_used" => provider_result[:model_used],
       "provider" => to_str(r.provider),
-      "upstream_provider" => outcome[:upstream_provider],
-      "params" => Params.merge(r.effective_params, meta[:params]),
+      "upstream_provider" => provider_result[:upstream_provider],
+      "params" => Params.merge(r.params, meta[:params]),
       "input" => build_input(meta),
-      "output" => build_output(outcome),
+      "output" => build_output(provider_result),
       "status" => to_str(status),
-      "finish_reason" => to_str(outcome[:finish_reason]),
-      "stop_kind" => stop_kind(outcome),
+      "finish_reason" => to_str(provider_result[:finish_reason]),
+      "stop_kind" => stop_kind(provider_result),
       "error" => build_error(error),
       "usage" => %{
         "input_tokens" => usage[:input_tokens],
         "output_tokens" => usage[:output_tokens],
-        "cost_usd" => outcome[:cost_usd],
-        "cost_source" => to_str(outcome[:cost_source] || :unknown),
+        "cost_usd" => provider_result[:cost_usd],
+        "cost_source" => to_str(provider_result[:cost_source] || :unknown),
         "raw" => usage[:raw]
       },
       "latency_ms" => latency_ms,
@@ -195,11 +160,11 @@ defmodule PromptOnSDK.Generation do
 
   defp build_output(nil), do: nil
 
-  defp build_output(outcome) do
+  defp build_output(provider_result) do
     output =
       %{}
-      |> maybe_put("content", outcome[:content])
-      |> maybe_put("tool_calls", outcome[:tool_calls])
+      |> maybe_put("content", provider_result[:content])
+      |> maybe_put("tool_calls", provider_result[:tool_calls])
 
     if map_size(output) == 0, do: nil, else: output
   end
@@ -225,10 +190,10 @@ defmodule PromptOnSDK.Generation do
 
   defp stop_kind(nil), do: nil
 
-  defp stop_kind(outcome) do
-    case outcome[:stop_kind] do
+  defp stop_kind(provider_result) do
+    case provider_result[:stop_kind] do
       nil ->
-        case outcome[:finish_reason] do
+        case provider_result[:finish_reason] do
           nil -> nil
           reason -> reason |> StopKind.normalize() |> to_str()
         end
@@ -238,12 +203,15 @@ defmodule PromptOnSDK.Generation do
     end
   end
 
-  defp normalize_outcome(nil), do: nil
-  defp normalize_outcome(content) when is_binary(content), do: %{content: content}
+  defp normalize_result(nil), do: nil
+  defp normalize_result(content) when is_binary(content), do: %{content: content}
 
-  defp normalize_outcome(outcome) when is_map(outcome) do
-    outcome =
-      atomize(outcome, [
+  defp normalize_result(%Result{} = result),
+    do: result |> Result.to_log_fields() |> normalize_result()
+
+  defp normalize_result(provider_result) when is_map(provider_result) do
+    provider_result =
+      atomize(provider_result, [
         :content,
         :tool_calls,
         :finish_reason,
@@ -259,22 +227,22 @@ defmodule PromptOnSDK.Generation do
       ])
 
     usage =
-      case outcome[:usage] do
+      case provider_result[:usage] do
         %{} = u ->
           atomize(u, [:input_tokens, :output_tokens, :raw])
 
         _ ->
           %{
-            input_tokens: outcome[:input_tokens],
-            output_tokens: outcome[:output_tokens],
+            input_tokens: provider_result[:input_tokens],
+            output_tokens: provider_result[:output_tokens],
             raw: nil
           }
       end
 
-    Map.put(outcome, :usage, usage)
+    Map.put(provider_result, :usage, usage)
   end
 
-  defp normalize_outcome(_), do: nil
+  defp normalize_result(_), do: nil
 
   defp normalize_meta(meta) when is_list(meta), do: normalize_meta(Map.new(meta))
 

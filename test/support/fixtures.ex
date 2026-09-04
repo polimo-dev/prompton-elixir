@@ -1,7 +1,7 @@
 defmodule PromptOnSDK.Fixtures do
   @moduledoc """
-  Reference snapshot for tests (§6.2 format **v3**, HeyDiary mapping). A string-keyed map, the same
-  shape as a `Jason.decode/1` result.
+  Reference use-case document for tests (§6.2 format **v4**, HeyDiary mapping). A string-keyed
+  map, the same shape as a `Jason.decode/1` result.
 
   A deployment is a pin, not a router: one model per use case plus one version pin per prompt name.
 
@@ -39,7 +39,21 @@ defmodule PromptOnSDK.Fixtures do
     m_embed: "981220e0-87ce-4b84-b424-0231f66a1fd7"
   }
 
-  @diary_user_template "{% if mode == \"incremental\" %}Here is the existing diary:\n\n{{ existing_diary }}\n\nAppend these new voice transcriptions:\n\n{% for t in transcriptions %}{{ forloop.index }}. {{ t }}\n\n{% endfor %}{% elsif mode == \"edit\" %}Edit the diary below according to the user's request.\n\n{{ user_content }}{% else %}Please write a diary entry based on these voice transcriptions:\n\n{% for t in transcriptions %}{{ forloop.index }}. {{ t }}\n\n{% endfor %}{% endif %}"
+  @diary_user_template ~S({% if mode == "incremental" %}Here is the existing diary:
+
+{{ existing_diary }}
+
+Append these new voice transcriptions:
+
+{% for t in transcriptions %}{{ forloop.index }}. {{ t }}
+
+{% endfor %}{% elsif mode == "edit" %}Edit the diary below according to the user's request.
+
+{{ user_content }}{% else %}Please write a diary entry based on these voice transcriptions:
+
+{% for t in transcriptions %}{{ forloop.index }}. {{ t }}
+
+{% endfor %}{% endif %})
 
   @doc "Name -> UUID."
   @spec id(atom()) :: String.t()
@@ -51,11 +65,11 @@ defmodule PromptOnSDK.Fixtures do
   @doc "The diary_generation user prompt template."
   def diary_user_template, do: @diary_user_template
 
-  @doc "The reference snapshot (string-keyed map, schema v3)."
+  @doc "The reference snapshot (string-keyed map, schema v4)."
   @spec snapshot() :: map()
   def snapshot do
     %{
-      "schema_version" => 3,
+      "schema_version" => 4,
       "project" => "heydiary",
       "environment" => "production",
       "use_cases" => %{
@@ -256,10 +270,10 @@ defmodule PromptOnSDK.Fixtures do
     }
   end
 
-  @doc "The decoded snapshot data."
-  @spec snapshot_data() :: PromptOnSDK.SnapshotData.t()
+  @doc "The decoded use-case document."
+  @spec snapshot_data() :: PromptOnSDK.UseCaseDocument.t()
   def snapshot_data do
-    {:ok, data, []} = PromptOnSDK.SnapshotData.decode(snapshot())
+    {:ok, data, []} = PromptOnSDK.UseCaseDocument.decode(snapshot())
     data
   end
 end

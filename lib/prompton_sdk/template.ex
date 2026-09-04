@@ -2,7 +2,8 @@ defmodule PromptOnSDK.Template do
   @moduledoc """
   Prompt template rendering: a Liquid subset (`solid` ~> 1.3, observed with 1.3.3).
 
-  The SDK (`PromptOnSDK.render/2`) and the server (lint and `detected_variables` when saving a
+  The SDK (`PromptOnSDK.messages/3`, `PromptOnSDK.text/3`) and the server (lint and
+  `detected_variables` when saving a
   PromptVersion, Playground rendering) use the same code.
 
   ## solid API used
@@ -247,12 +248,14 @@ defmodule PromptOnSDK.Template do
         |> Enum.map(&{:disallowed_filter, &1})
 
       {:error, %Solid.TemplateError{errors: errors}} ->
-        Enum.map(errors, fn %Solid.ParserError{reason: reason} ->
-          case Regex.run(~r/^Unexpected tag '([^']+)'$/, reason) do
-            [_, name] -> {:disallowed_tag, name}
-            _ -> {:parse, reason}
-          end
-        end)
+        Enum.map(errors, &parser_error_reason/1)
+    end
+  end
+
+  defp parser_error_reason(%Solid.ParserError{reason: reason}) do
+    case Regex.run(~r/^Unexpected tag '([^']+)'$/, reason) do
+      [_, name] -> {:disallowed_tag, name}
+      _ -> {:parse, reason}
     end
   end
 

@@ -1,44 +1,12 @@
 defmodule PromptOnSDK.Snapshot do
-  @moduledoc """
-  Snapshot loader/poller GenServer (§7.3). The result goes into `PromptOnSDK.Snapshot.Store`
-  (`:persistent_term`); `PromptOnSDK.resolve/3` bypasses this process and reads only the
-  persistent_term.
-
-  ## Fallback chain
-
-      init: load disk cache → bundle synchronously (if present, valid, and the environment matches)
-      handle_continue: GET /snapshot (receive_timeout 3s); does not block boot
-        200 → replace persistent_term + atomic disk cache write (+ sidecar)
-              + [:prompton, :snapshot, :updated], source :remote
-        304 → no-op (if we came up from disk/bundle, promote to :remote; the server confirmed
-              "that ETag is current")
-        failure → keep the existing entry (record stale_since)
-              + [:prompton, :snapshot, :fetch_error] + [:prompton, :snapshot, :stale] (age)
-              with no entry, resolve returns {:error, :not_ready}
-      afterwards: If-None-Match polling every poll_interval. Failures back off exponentially,
-              poll_interval×2ⁿ (default 10s → 20 → 40 → 80 → 160 → 300s cap)
-
-  ## Modes
-
-  * `:live`: all of the above.
-  * `:offline`: no HTTP. Loads disk/bundle only (CI, local). `refresh/0` re-reads the files.
-  * `:test`: does nothing. Snapshots are injected with `PromptOnSDK.Test.put_snapshot/1`.
-
-  Without `api_key` or `base_url`, the remote is not called even in `:live` (one warning).
-
-  ## Environment guard
-
-  If a disk/bundle snapshot's `environment` differs from the configured `environment`
-  (`config.env_slug`), it is rejected + `Logger.warning`. The next fallback is tried; if all
-  fail, `source: :none`.
-  """
+  @moduledoc false
 
   use GenServer
   require Logger
 
   alias PromptOnSDK.Snapshot.Store
-  alias PromptOnSDK.SnapshotData
   alias PromptOnSDK.Telemetry
+  alias PromptOnSDK.UseCaseDocument
 
   @initial_fetch_timeout 3_000
   @backoff_cap 300_000
@@ -54,15 +22,15 @@ defmodule PromptOnSDK.Snapshot do
   end
 
   @doc "Synchronous reload: remote fetch in `:live`, file reload in `:offline`, `:ok` in `:test`."
-  @spec refresh(timeout()) :: :ok | {:error, term()}
-  def refresh(timeout \\ 15_000) do
+  @spec refresh_use_case_document(timeout()) :: :ok | {:error, term()}
+  def refresh_use_case_document(timeout \\ 15_000) do
     GenServer.call(__MODULE__, :refresh, timeout)
   catch
     :exit, {:noproc, _} -> {:error, :not_started}
     :exit, {:timeout, _} -> {:error, :timeout}
   end
 
-  @doc "`PromptOnSDK.snapshot_info/0`."
+  @doc "`PromptOnSDK.use_case_document_info/0`."
   @spec info() :: map()
   def info, do: Store.info(Store.get())
 
@@ -144,11 +112,15 @@ defmodule PromptOnSDK.Snapshot do
       ]
       |> Enum.reject(&is_nil/1)
 
-    Enum.reduce_while(candidates, {:error, :no_local_snapshot}, fn {path, source}, acc ->
+    Enum.reduce_while(candidates, {:error, :no_local_use_case_document}, fn {path, source}, acc ->
       case Store.load_file(path, source, config.env_slug) do
         {:ok, entry} ->
           Store.put(entry)
-          Logger.info("[PromptOn] loaded snapshot from #{source} (#{path}), etag=#{entry.etag}")
+
+          Logger.info(
+            "[PromptOn] loaded use-case document from #{source} (#{path}), etag=#{entry.etag}"
+          )
+
           {:halt, :ok}
 
         {:error, {:file, :enoent}} ->
@@ -156,7 +128,7 @@ defmodule PromptOnSDK.Snapshot do
 
         {:error, {:environment_mismatch, file_env, key_env}} ->
           Logger.warning(
-            "[PromptOn] rejected #{source} snapshot #{path}: environment #{inspect(file_env)} " <>
+            "[PromptOn] rejected #{source} use-case document #{path}: environment #{inspect(file_env)} " <>
               "does not match the configured environment #{inspect(key_env)}"
           )
 
@@ -164,7 +136,7 @@ defmodule PromptOnSDK.Snapshot do
 
         {:error, reason} ->
           Logger.warning(
-            "[PromptOn] could not load #{source} snapshot #{path}: #{inspect(reason)}"
+            "[PromptOn] could not load #{source} use-case document #{path}: #{inspect(reason)}"
           )
 
           {:cont, {:error, reason}}
@@ -186,7 +158,7 @@ defmodule PromptOnSDK.Snapshot do
 
     result =
       try do
-        config.client.fetch_snapshot(config, etag, opts)
+        config.client.fetch_use_cases(config, etag, opts)
       rescue
         e -> {:error, {:client_exception, e}}
       catch
@@ -230,14 +202,14 @@ defmodule PromptOnSDK.Snapshot do
     Store.put(entry)
     persist_disk(config, resp.body, entry)
 
-    Telemetry.execute(Telemetry.snapshot_updated(), %{}, %{
+    Telemetry.execute(Telemetry.use_case_document_updated(), %{}, %{
       etag: entry.etag,
       source: :remote,
       environment: data.environment,
       previous_etag: current && current.etag
     })
 
-    Logger.info("[PromptOn] snapshot updated etag=#{entry.etag} env=#{data.environment}")
+    Logger.info("[PromptOn] use-case document updated etag=#{entry.etag} env=#{data.environment}")
     {:ok, %{state | failures: 0}}
   end
 
@@ -260,13 +232,15 @@ defmodule PromptOnSDK.Snapshot do
     state = %{state | failures: failures}
     now = DateTime.utc_now()
 
-    Telemetry.execute(Telemetry.snapshot_fetch_error(), %{}, %{
+    Telemetry.execute(Telemetry.use_case_document_fetch_error(), %{}, %{
       reason: reason,
       attempt: failures,
       next_retry_ms: next_interval(state)
     })
 
-    Logger.warning("[PromptOn] snapshot fetch failed (attempt #{failures}): #{inspect(reason)}")
+    Logger.warning(
+      "[PromptOn] use-case document fetch failed (attempt #{failures}): #{inspect(reason)}"
+    )
 
     case current do
       nil ->
@@ -277,7 +251,7 @@ defmodule PromptOnSDK.Snapshot do
         Store.put(entry)
 
         Telemetry.execute(
-          Telemetry.snapshot_stale(),
+          Telemetry.use_case_document_stale(),
           %{age_seconds: Store.age_seconds(entry, now) || 0},
           %{source: entry.source, reason: reason, etag: entry.etag}
         )
@@ -286,14 +260,16 @@ defmodule PromptOnSDK.Snapshot do
     {{:error, reason}, state}
   end
 
-  defp decode_body(body) when is_binary(body), do: SnapshotData.decode_json(body)
-  defp decode_body(body) when is_map(body), do: SnapshotData.decode(body)
-  defp decode_body(other), do: {:error, {:invalid_snapshot, "unexpected body #{inspect(other)}"}}
+  defp decode_body(body) when is_binary(body), do: UseCaseDocument.decode_json(body)
+  defp decode_body(body) when is_map(body), do: UseCaseDocument.decode(body)
+
+  defp decode_body(other),
+    do: {:error, {:invalid_use_case_document, "unexpected body #{inspect(other)}"}}
 
   defp warn_decode([]), do: :ok
 
   defp warn_decode(warnings) do
-    Logger.warning("[PromptOn] snapshot decoded with warnings: #{inspect(warnings)}")
+    Logger.warning("[PromptOn] use-case document decoded with warnings: #{inspect(warnings)}")
   end
 
   defp persist_disk(%{disk_cache: nil}, _body, _entry), do: :ok
@@ -350,8 +326,8 @@ defmodule PromptOnSDK.Snapshot do
 
   defp describe_source do
     case Store.get() do
-      nil -> "nothing (resolve returns {:error, :not_ready})"
-      %{source: source} -> "#{source} snapshot"
+      nil -> "nothing (use_case returns {:error, :not_ready})"
+      %{source: source} -> "#{source} use-case document"
     end
   end
 end

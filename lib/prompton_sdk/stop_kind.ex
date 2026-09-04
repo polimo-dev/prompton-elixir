@@ -2,8 +2,7 @@ defmodule PromptOnSDK.StopKind do
   @moduledoc """
   Normalizes each provider's raw `finish_reason` into a `stop_kind` (§5.7).
 
-  SDK adapters (`PromptOnSDK.OpenRouter.outcome/1`, etc.) and the server ingest share the same
-  table.
+  `PromptOnSDK.Result` factories and the server ingest share the same table.
 
   | Raw (`finish_reason`) | `stop_kind` | Source |
   |---|---|---|
@@ -16,7 +15,7 @@ defmodule PromptOnSDK.StopKind do
   Comparison is case-insensitive and ignores surrounding whitespace (`"STOP"` → `:stop`).
   **Normalization is idempotent**: already-normalized values (`stop`, `length`, `tool_call`,
   `content_filter`, `other`; string or atom) pass through unchanged (`"tool_call"` →
-  `:tool_call`). `Generation.build/8` re-normalizes the `stop_kind` of an adapter-built outcome,
+  `:tool_call`). The SDK log builder re-normalizes the `stop_kind` of a provider result,
   and the server ingest normalizes the client's `stop_kind` with the same rules, so without this
   property `tool_call` would turn into `:other`.
   `truncated?/1` is true only when `stop_kind == :length`; **`tool_calls` is not a truncation**

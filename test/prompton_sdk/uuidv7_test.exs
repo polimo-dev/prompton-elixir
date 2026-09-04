@@ -44,7 +44,7 @@ defmodule PromptOnSDK.UUIDv7Test do
     assert UUIDv7.timestamp_ms("nope") == :error
   end
 
-  test "PromptOnSDK.generation_id/0 delegates" do
-    assert PromptOnSDK.generation_id() =~ @format
+  test "PromptOnSDK.log_id/0 delegates" do
+    assert PromptOnSDK.log_id() =~ @format
   end
 end

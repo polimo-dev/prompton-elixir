@@ -1,6 +1,6 @@
 defmodule PromptOnSDK.ResolverTest do
   @moduledoc """
-  Resolution algorithm (snapshot v3): a deployment is a pin, not a router.
+  Use case selection algorithm (snapshot v4): a deployment is a pin, not a router.
   With no rules, conditions, targets, or weights, only three things need verifying: (1) prompt name
   selection, (2) parameter merging, (3) the error/warning contract for what is missing (use case,
   deployment, prompt, model).
@@ -8,7 +8,7 @@ defmodule PromptOnSDK.ResolverTest do
 
   use ExUnit.Case, async: true
 
-  alias PromptOnSDK.{Fixtures, Resolver, SnapshotData}
+  alias PromptOnSDK.{Fixtures, Resolver, UseCaseDocument}
 
   setup do
     %{snapshot: Fixtures.snapshot_data()}
@@ -94,9 +94,9 @@ defmodule PromptOnSDK.ResolverTest do
       assert {:ok, r} = Resolver.resolve(snapshot, "diary_generation")
 
       # use case default_params temperature 0.5 ⊕ deployment 0.4
-      assert r.effective_params == %{"temperature" => 0.4}
+      assert r.params == %{"temperature" => 0.4}
       # model provider_options only:[Anthropic] ⊕ deployment allow_fallbacks:false
-      assert r.effective_provider_options == %{
+      assert r.provider_options == %{
                "only" => ["Anthropic"],
                "allow_fallbacks" => false
              }
@@ -110,7 +110,7 @@ defmodule PromptOnSDK.ResolverTest do
       snapshot: snapshot
     } do
       assert {:ok, r} = Resolver.resolve(snapshot, "chat_response")
-      assert r.effective_params == %{"temperature" => 0.7, "max_tokens" => 1024}
+      assert r.params == %{"temperature" => 0.7, "max_tokens" => 1024}
     end
   end
 
@@ -128,7 +128,7 @@ defmodule PromptOnSDK.ResolverTest do
         Fixtures.snapshot()
         |> update_in(["prompt_versions"], &Map.delete(&1, Fixtures.id(:pv_en)))
 
-      {:ok, data, _} = SnapshotData.decode(snapshot)
+      {:ok, data, _} = UseCaseDocument.decode(snapshot)
 
       assert {:ok, r} = Resolver.resolve(data, "diary_generation")
       assert r.prompt_version_id == nil
@@ -140,14 +140,14 @@ defmodule PromptOnSDK.ResolverTest do
       snapshot =
         Fixtures.snapshot() |> update_in(["models"], &Map.delete(&1, Fixtures.id(:m_sonnet4)))
 
-      {:ok, data, _} = SnapshotData.decode(snapshot)
+      {:ok, data, _} = UseCaseDocument.decode(snapshot)
 
       assert {:ok, r} = Resolver.resolve(data, "diary_generation")
       assert r.model == nil
       assert r.model_id == nil
       assert r.warnings == [{:missing_model, Fixtures.id(:m_sonnet4)}]
       # UseCase defaults are kept even when the model is missing
-      assert r.effective_params == %{"temperature" => 0.4}
+      assert r.params == %{"temperature" => 0.4}
     end
   end
 

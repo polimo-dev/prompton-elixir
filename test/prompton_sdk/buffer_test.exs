@@ -32,7 +32,7 @@ defmodule PromptOnSDK.BufferTest do
 
   defp collect_batches(acc \\ []) do
     receive do
-      {:fake_client, :post_generations, [items]} -> collect_batches([items | acc])
+      {:fake_client, :post_logs, [items]} -> collect_batches([items | acc])
     after
       0 -> Enum.reverse(acc)
     end
@@ -41,63 +41,63 @@ defmodule PromptOnSDK.BufferTest do
   test "flushes by size (flush_size) in batches ≤ 200 and emits flush telemetry" do
     attach_telemetry([@flush])
     FakeClient.notify(self())
-    FakeClient.set(:post_generations, fn items -> ok_202(length(items)) end)
+    FakeClient.set(:post_logs, fn items -> ok_202(length(items)) end)
     start_buffer(flush_size: 5, flush_interval: 60_000)
 
-    for i <- 1..5, do: assert(:ok = Buffer.enqueue(:generations, gen(i)))
+    for i <- 1..5, do: assert(:ok = Buffer.enqueue(:logs, gen(i)))
 
-    assert_receive {:fake_client, :post_generations, [items]}, 500
+    assert_receive {:fake_client, :post_logs, [items]}, 500
     assert Enum.map(items, & &1["id"]) == Enum.map(1..5, &"gen-#{&1}")
 
     assert_receive {:telemetry, @flush, %{count: 5, accepted: 5, rejected: 0},
-                    %{lane: :generations, status: 202}},
+                    %{lane: :logs, status: 202}},
                    500
 
-    eventually(fn -> Buffer.stats().generations.count == 0 end)
+    eventually(fn -> Buffer.stats().logs.count == 0 end)
   end
 
   test "flushes by time (flush_interval) when below size threshold" do
     FakeClient.notify(self())
-    FakeClient.set(:post_generations, fn _ -> ok_202() end)
+    FakeClient.set(:post_logs, fn _ -> ok_202() end)
     start_buffer(flush_interval: 30, flush_size: 100)
 
-    Buffer.enqueue(:generations, gen(1))
-    refute_receive {:fake_client, :post_generations, _}, 10
-    assert_receive {:fake_client, :post_generations, [[%{"id" => "gen-1"}]]}, 500
+    Buffer.enqueue(:logs, gen(1))
+    refute_receive {:fake_client, :post_logs, _}, 10
+    assert_receive {:fake_client, :post_logs, [[%{"id" => "gen-1"}]]}, 500
   end
 
   test "flushes by bytes (flush_bytes)" do
     FakeClient.notify(self())
-    FakeClient.set(:post_generations, fn _ -> ok_202() end)
+    FakeClient.set(:post_logs, fn _ -> ok_202() end)
     start_buffer(flush_bytes: 300, flush_interval: 60_000)
 
-    Buffer.enqueue(:generations, gen(1))
-    refute_receive {:fake_client, :post_generations, _}, 10
-    Buffer.enqueue(:generations, Map.put(gen(2), "pad", String.duplicate("x", 300)))
-    assert_receive {:fake_client, :post_generations, [[_, _]]}, 500
+    Buffer.enqueue(:logs, gen(1))
+    refute_receive {:fake_client, :post_logs, _}, 10
+    Buffer.enqueue(:logs, Map.put(gen(2), "pad", String.duplicate("x", 300)))
+    assert_receive {:fake_client, :post_logs, [[_, _]]}, 500
   end
 
   test "batches are capped at 200 per request even if flush_size is larger" do
     FakeClient.notify(self())
-    FakeClient.set(:post_generations, fn _ -> ok_202() end)
+    FakeClient.set(:post_logs, fn _ -> ok_202() end)
     start_buffer(flush_size: 500, flush_interval: 20)
 
-    for i <- 1..250, do: Buffer.enqueue(:generations, gen(i))
-    assert_receive {:fake_client, :post_generations, [batch1]}, 500
-    assert_receive {:fake_client, :post_generations, [batch2]}, 500
+    for i <- 1..250, do: Buffer.enqueue(:logs, gen(i))
+    assert_receive {:fake_client, :post_logs, [batch1]}, 500
+    assert_receive {:fake_client, :post_logs, [batch2]}, 500
     assert length(batch1) == 200 and length(batch2) == 50
   end
 
   test "batches are also capped at 4MB encoded, splitting when items would exceed it" do
     FakeClient.notify(self())
-    FakeClient.set(:post_generations, fn _ -> ok_202() end)
+    FakeClient.set(:post_logs, fn _ -> ok_202() end)
     start_buffer(flush_size: 3, flush_bytes: 100_000_000, flush_interval: 60_000)
 
     big = String.duplicate("x", 1_500_000)
-    for i <- 1..3, do: Buffer.enqueue(:generations, Map.put(gen(i), "pad", big))
+    for i <- 1..3, do: Buffer.enqueue(:logs, Map.put(gen(i), "pad", big))
 
-    assert_receive {:fake_client, :post_generations, [batch1]}, 2_000
-    assert_receive {:fake_client, :post_generations, [batch2]}, 2_000
+    assert_receive {:fake_client, :post_logs, [batch1]}, 2_000
+    assert_receive {:fake_client, :post_logs, [batch2]}, 2_000
     assert Enum.map(batch1, & &1["id"]) == ["gen-1", "gen-2"]
     assert Enum.map(batch2, & &1["id"]) == ["gen-3"]
     assert byte_size(Jason.encode!(batch1)) <= 4_000_000
@@ -106,21 +106,20 @@ defmodule PromptOnSDK.BufferTest do
   test "a single item over 4MB is dropped at enqueue with reason :too_large" do
     attach_telemetry([@dropped])
     FakeClient.notify(self())
-    FakeClient.set(:post_generations, fn _ -> ok_202() end)
+    FakeClient.set(:post_logs, fn _ -> ok_202() end)
     start_buffer(flush_size: 1, flush_interval: 60_000)
 
     log =
       ExUnit.CaptureLog.capture_log(fn ->
-        Buffer.enqueue(:generations, Map.put(gen(1), "pad", String.duplicate("x", 4_100_000)))
+        Buffer.enqueue(:logs, Map.put(gen(1), "pad", String.duplicate("x", 4_100_000)))
 
-        assert_receive {:telemetry, @dropped, %{count: 1},
-                        %{reason: :too_large, lane: :generations}},
+        assert_receive {:telemetry, @dropped, %{count: 1}, %{reason: :too_large, lane: :logs}},
                        2_000
       end)
 
     assert log =~ "exceeds the 4000000-byte request limit"
-    assert Buffer.stats().generations.count == 0
-    refute_receive {:fake_client, :post_generations, _}, 50
+    assert Buffer.stats().logs.count == 0
+    refute_receive {:fake_client, :post_logs, _}, 50
   end
 
   test "413 splits the batch in half and resends the halves as-is; a lone 413 item is dropped" do
@@ -128,56 +127,56 @@ defmodule PromptOnSDK.BufferTest do
     FakeClient.notify(self())
 
     # Any batch containing gen-3 gets a 413 (the item itself is too large); everything else 202
-    FakeClient.set(:post_generations, fn items ->
+    FakeClient.set(:post_logs, fn items ->
       if Enum.any?(items, &(&1["id"] == "gen-3")),
         do: {:ok, %{status: 413, body: %{"error" => %{"code" => "too_large"}}, headers: %{}}},
         else: ok_202(length(items))
     end)
 
     start_buffer(flush_size: 4, flush_interval: 60_000)
-    for i <- 1..4, do: Buffer.enqueue(:generations, gen(i))
+    for i <- 1..4, do: Buffer.enqueue(:logs, gen(i))
 
-    assert_receive {:fake_client, :post_generations, [[_, _, _, _]]}, 500
+    assert_receive {:fake_client, :post_logs, [[_, _, _, _]]}, 500
 
     assert_receive {:telemetry, @error, %{count: 4},
                     %{reason: :payload_too_large, status: 413, retry_in_ms: 0}},
                    500
 
     # The two halves go out in order, without being merged back together
-    assert_receive {:fake_client, :post_generations, [[%{"id" => "gen-1"}, %{"id" => "gen-2"}]]},
+    assert_receive {:fake_client, :post_logs, [[%{"id" => "gen-1"}, %{"id" => "gen-2"}]]},
                    500
 
-    assert_receive {:fake_client, :post_generations, [[%{"id" => "gen-3"}, %{"id" => "gen-4"}]]},
+    assert_receive {:fake_client, :post_logs, [[%{"id" => "gen-3"}, %{"id" => "gen-4"}]]},
                    500
 
     assert_receive {:telemetry, @flush, %{count: 2, accepted: 2}, _}, 500
 
     # The second half is also 413, so it is halved again: gen-3 alone gets 413 and is dropped,
     # gen-4 succeeds
-    assert_receive {:fake_client, :post_generations, [[%{"id" => "gen-3"}]]}, 500
-    assert_receive {:fake_client, :post_generations, [[%{"id" => "gen-4"}]]}, 500
+    assert_receive {:fake_client, :post_logs, [[%{"id" => "gen-3"}]]}, 500
+    assert_receive {:fake_client, :post_logs, [[%{"id" => "gen-4"}]]}, 500
 
-    assert_receive {:telemetry, @dropped, %{count: 1}, %{reason: :too_large, lane: :generations}},
+    assert_receive {:telemetry, @dropped, %{count: 1}, %{reason: :too_large, lane: :logs}},
                    500
 
     assert_receive {:telemetry, @flush, %{count: 1, accepted: 1}, _}, 500
 
-    eventually(fn -> Buffer.stats().generations.count == 0 end)
+    eventually(fn -> Buffer.stats().logs.count == 0 end)
     assert Buffer.stats().failures == 0
-    refute_receive {:fake_client, :post_generations, _}, 50
+    refute_receive {:fake_client, :post_logs, _}, 50
   end
 
   test "413 halves are resent during a synchronous drain too" do
     FakeClient.notify(self())
 
-    FakeClient.set(:post_generations, fn items ->
+    FakeClient.set(:post_logs, fn items ->
       if length(items) > 1,
         do: {:ok, %{status: 413, body: "", headers: %{}}},
         else: ok_202(1)
     end)
 
     start_buffer(flush_size: 100, flush_interval: 60_000)
-    for i <- 1..4, do: Buffer.enqueue(:generations, gen(i))
+    for i <- 1..4, do: Buffer.enqueue(:logs, gen(i))
     _ = Buffer.stats()
 
     assert {:ok, 0} = Buffer.flush()
@@ -198,7 +197,7 @@ defmodule PromptOnSDK.BufferTest do
     attach_telemetry([@error])
     FakeClient.notify(self())
 
-    FakeClient.set(:post_generations, fn _ ->
+    FakeClient.set(:post_logs, fn _ ->
       {:ok,
        %{
          status: 503,
@@ -208,13 +207,13 @@ defmodule PromptOnSDK.BufferTest do
     end)
 
     start_buffer(flush_size: 1, flush_interval: 60_000)
-    Buffer.enqueue(:generations, gen(1))
+    Buffer.enqueue(:logs, gen(1))
 
     assert_receive {:telemetry, @error, %{count: 1},
                     %{reason: :http_5xx, status: 503, retry_in_ms: 5_000}},
                    500
 
-    eventually(fn -> Buffer.stats().generations.count == 1 end)
+    eventually(fn -> Buffer.stats().logs.count == 1 end)
     assert Buffer.stats().paused_until != nil
     assert Buffer.stats().failures == 1
   end
@@ -224,7 +223,7 @@ defmodule PromptOnSDK.BufferTest do
     FakeClient.notify(self())
     {:ok, agent} = Agent.start_link(fn -> :fail end)
 
-    FakeClient.set(:post_generations, fn _ ->
+    FakeClient.set(:post_logs, fn _ ->
       case Agent.get(agent, & &1) do
         :fail -> {:ok, %{status: 503, body: "down", headers: %{}}}
         :ok -> ok_202()
@@ -232,10 +231,10 @@ defmodule PromptOnSDK.BufferTest do
     end)
 
     start_buffer(flush_size: 2, flush_interval: 60_000)
-    Buffer.enqueue(:generations, gen(1))
-    Buffer.enqueue(:generations, gen(2))
+    Buffer.enqueue(:logs, gen(1))
+    Buffer.enqueue(:logs, gen(2))
 
-    assert_receive {:fake_client, :post_generations, [[%{"id" => "gen-1"}, %{"id" => "gen-2"}]]},
+    assert_receive {:fake_client, :post_logs, [[%{"id" => "gen-1"}, %{"id" => "gen-2"}]]},
                    500
 
     assert_receive {:telemetry, @error, %{count: 2},
@@ -243,10 +242,10 @@ defmodule PromptOnSDK.BufferTest do
                    500
 
     assert retry >= 1_000 and retry <= 2_000
-    eventually(fn -> Buffer.stats().generations.count == 2 end)
-    Buffer.enqueue(:generations, gen(3))
+    eventually(fn -> Buffer.stats().logs.count == 2 end)
+    Buffer.enqueue(:logs, gen(3))
     # Nothing is resent while backing off
-    refute_receive {:fake_client, :post_generations, _}, 100
+    refute_receive {:fake_client, :post_logs, _}, 100
 
     Agent.update(agent, fn _ -> :ok end)
 
@@ -260,42 +259,42 @@ defmodule PromptOnSDK.BufferTest do
     attach_telemetry([@error])
     FakeClient.notify(self())
 
-    FakeClient.set(:post_generations, fn _ ->
+    FakeClient.set(:post_logs, fn _ ->
       {:error, %Mint.TransportError{reason: :econnrefused}}
     end)
 
     start_buffer(flush_size: 1, flush_interval: 60_000)
 
-    Buffer.enqueue(:generations, gen(1))
+    Buffer.enqueue(:logs, gen(1))
     assert_receive {:telemetry, @error, _, %{reason: %Mint.TransportError{}}}, 500
-    eventually(fn -> Buffer.stats().generations.count == 1 end)
+    eventually(fn -> Buffer.stats().logs.count == 1 end)
 
-    FakeClient.set(:post_generations, fn _ -> raise "task boom" end)
+    FakeClient.set(:post_logs, fn _ -> raise "task boom" end)
     start_supervised!({Task.Supervisor, name: :unused})
-    Buffer.enqueue(:generations, gen(2))
+    Buffer.enqueue(:logs, gen(2))
     # Backoff is active, so force it with flush
     Buffer.flush(200)
     assert_receive {:telemetry, @error, _, %{reason: {:client_exception, _}}}, 500
-    assert Buffer.stats().generations.count == 2
+    assert Buffer.stats().logs.count == 2
   end
 
   test "4xx (other than 429) drops the batch with error + dropped telemetry" do
     attach_telemetry([@error, @dropped])
     FakeClient.notify(self())
 
-    FakeClient.set(:post_generations, fn _ ->
+    FakeClient.set(:post_logs, fn _ ->
       {:ok, %{status: 401, body: %{"error" => "unauthorized"}, headers: %{}}}
     end)
 
     start_buffer(flush_size: 1, flush_interval: 60_000)
 
-    Buffer.enqueue(:generations, gen(1))
+    Buffer.enqueue(:logs, gen(1))
     assert_receive {:telemetry, @error, %{count: 1}, %{reason: :http_4xx, status: 401}}, 500
 
-    assert_receive {:telemetry, @dropped, %{count: 1}, %{reason: :http_4xx, lane: :generations}},
+    assert_receive {:telemetry, @dropped, %{count: 1}, %{reason: :http_4xx, lane: :logs}},
                    500
 
-    eventually(fn -> Buffer.stats().generations.count == 0 end)
+    eventually(fn -> Buffer.stats().logs.count == 0 end)
     assert Buffer.stats().failures == 0
   end
 
@@ -303,19 +302,19 @@ defmodule PromptOnSDK.BufferTest do
     attach_telemetry([@error])
     FakeClient.notify(self())
 
-    FakeClient.set(:post_generations, fn _ ->
+    FakeClient.set(:post_logs, fn _ ->
       {:ok, %{status: 429, body: "", headers: %{"retry-after" => "7"}}}
     end)
 
     start_buffer(flush_size: 1, flush_interval: 60_000)
 
-    Buffer.enqueue(:generations, gen(1))
+    Buffer.enqueue(:logs, gen(1))
 
     assert_receive {:telemetry, @error, %{count: 1},
                     %{reason: :rate_limited, status: 429, retry_in_ms: 7_000}},
                    500
 
-    eventually(fn -> Buffer.stats().generations.count == 1 end)
+    eventually(fn -> Buffer.stats().logs.count == 1 end)
     assert Buffer.stats().paused_until != nil
   end
 
@@ -323,7 +322,7 @@ defmodule PromptOnSDK.BufferTest do
     attach_telemetry([@flush])
     FakeClient.notify(self())
 
-    FakeClient.set(:post_generations, fn items ->
+    FakeClient.set(:post_logs, fn items ->
       {:ok,
        %{
          status: 202,
@@ -340,26 +339,26 @@ defmodule PromptOnSDK.BufferTest do
 
     log =
       ExUnit.CaptureLog.capture_log(fn ->
-        Buffer.enqueue(:generations, gen(1))
-        Buffer.enqueue(:generations, gen(2))
+        Buffer.enqueue(:logs, gen(1))
+        Buffer.enqueue(:logs, gen(2))
         assert_receive {:telemetry, @flush, %{count: 2, accepted: 1, rejected: 1}, _}, 500
       end)
 
     assert log =~ "1 item(s) rejected"
-    assert Buffer.stats().generations.count == 0
+    assert Buffer.stats().logs.count == 0
   end
 
   test "max_buffer drops the oldest items with dropped telemetry and a rate-limited warning" do
     attach_telemetry([@dropped])
-    FakeClient.set(:post_generations, fn _ -> ok_202() end)
+    FakeClient.set(:post_logs, fn _ -> ok_202() end)
     start_buffer(max_buffer: 3, flush_size: 100, flush_interval: 60_000)
 
     log =
       ExUnit.CaptureLog.capture_log(fn ->
-        for i <- 1..5, do: Buffer.enqueue(:generations, gen(i))
+        for i <- 1..5, do: Buffer.enqueue(:logs, gen(i))
         assert_receive {:telemetry, @dropped, %{count: 1}, %{reason: :max_buffer}}, 500
         assert_receive {:telemetry, @dropped, %{count: 1}, %{reason: :max_buffer}}, 500
-        eventually(fn -> Buffer.stats().generations.count == 3 end)
+        eventually(fn -> Buffer.stats().logs.count == 3 end)
       end)
 
     assert length(Regex.scan(~r/log buffer full/, log)) == 1
@@ -372,24 +371,24 @@ defmodule PromptOnSDK.BufferTest do
   test "unencodable items are dropped without crashing" do
     attach_telemetry([@dropped])
     start_buffer()
-    Buffer.enqueue(:generations, %{"bad" => make_ref()})
+    Buffer.enqueue(:logs, %{"bad" => make_ref()})
     assert_receive {:telemetry, @dropped, %{count: 1}, %{reason: :encode}}, 500
-    assert Buffer.stats().generations.count == 0
+    assert Buffer.stats().logs.count == 0
   end
 
   test "terminate drains synchronously" do
     FakeClient.notify(self())
-    FakeClient.set(:post_generations, fn _ -> ok_202() end)
+    FakeClient.set(:post_logs, fn _ -> ok_202() end)
     FakeClient.set(:post_feedback, fn _ -> ok_202() end)
     start_buffer(flush_size: 100, flush_interval: 60_000)
 
-    for i <- 1..3, do: Buffer.enqueue(:generations, gen(i))
-    Buffer.enqueue(:feedback, %{"generation_id" => "gen-1", "kind" => "thumbs", "value" => 1})
+    for i <- 1..3, do: Buffer.enqueue(:logs, gen(i))
+    Buffer.enqueue(:feedback, %{"log_id" => "gen-1", "kind" => "thumbs", "value" => 1})
     # Guarantees the enqueues have been processed
     _ = Buffer.stats()
 
     :ok = stop_supervised!(Buffer)
-    assert_received {:fake_client, :post_generations, [[_, _, _]]}
+    assert_received {:fake_client, :post_logs, [[_, _, _]]}
     assert_received {:fake_client, :post_feedback, [[%{"kind" => "thumbs"}]]}
   end
 
@@ -397,13 +396,13 @@ defmodule PromptOnSDK.BufferTest do
     FakeClient.notify(self())
     FakeClient.set(:post_feedback, fn _ -> ok_202() end)
     start_buffer(flush_size: 1, flush_interval: 60_000)
-    Buffer.enqueue(:feedback, %{"generation_id" => "g", "kind" => "rating", "value" => 5})
+    Buffer.enqueue(:feedback, %{"log_id" => "g", "kind" => "rating", "value" => 5})
     assert_receive {:fake_client, :post_feedback, [[%{"kind" => "rating"}]]}, 500
-    refute_receive {:fake_client, :post_generations, _}, 20
+    refute_receive {:fake_client, :post_logs, _}, 20
   end
 
   test "enqueue without a running buffer returns {:error, :not_running}" do
-    assert Buffer.enqueue(:generations, gen(1)) == {:error, :not_running}
+    assert Buffer.enqueue(:logs, gen(1)) == {:error, :not_running}
     assert Buffer.flush() == {:error, :not_running}
   end
 end

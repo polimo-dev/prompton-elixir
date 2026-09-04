@@ -1,11 +1,12 @@
 defmodule PromptOnSDK.AdaptersTest do
   use ExUnit.Case, async: true
 
-  alias PromptOnSDK.{Fixtures, Generic, OpenRouter, Resolver}
+  alias PromptOnSDK.{Fixtures, OpenRouter, Resolver, Result, UseCase}
 
   defp resolve(key, opts \\ []) do
     {:ok, r} = Resolver.resolve(Fixtures.snapshot_data(), key, opts)
-    r
+    {:ok, prompt_names} = Resolver.prompt_names(Fixtures.snapshot_data(), key)
+    UseCase.from_resolution(r, prompt_names)
   end
 
   describe "OpenRouter.request_body/3" do
@@ -25,7 +26,7 @@ defmodule PromptOnSDK.AdaptersTest do
     test "provider.only nil is preserved and serializes as null" do
       r = %{
         resolve("diary_generation")
-        | effective_provider_options: %{"only" => nil, "allow_fallbacks" => true}
+        | provider_options: %{"only" => nil, "allow_fallbacks" => true}
       }
 
       body = OpenRouter.request_body(r, [])
@@ -36,7 +37,7 @@ defmodule PromptOnSDK.AdaptersTest do
 
     test "provider key omitted when effective options are empty; overrides merge on top" do
       r = resolve("voice_transcription")
-      assert r.effective_provider_options == %{}
+      assert r.provider_options == %{}
 
       body =
         OpenRouter.request_body(r, [], %{
@@ -54,16 +55,25 @@ defmodule PromptOnSDK.AdaptersTest do
     test "nil params are dropped from the body" do
       r = %{
         resolve("chat_response")
-        | effective_params: %{"temperature" => nil, "top_p" => 0.9}
+        | params: %{"temperature" => nil, "top_p" => 0.9}
       }
 
       body = OpenRouter.request_body(r, [])
       refute Map.has_key?(body, "temperature")
       assert body["top_p"] == 0.9
     end
+
+    test "accepts only public UseCase structs" do
+      {:ok, internal_resolution} = Resolver.resolve(Fixtures.snapshot_data(), "chat_response")
+      request_body = Function.capture(OpenRouter, :request_body, 2)
+
+      assert_raise FunctionClauseError, fn ->
+        request_body.(internal_resolution, [])
+      end
+    end
   end
 
-  describe "OpenRouter.outcome/1" do
+  describe "Result.from_openai/1" do
     @resp %{
       "id" => "gen-1",
       "model" => "anthropic/claude-sonnet-4",
@@ -84,7 +94,7 @@ defmodule PromptOnSDK.AdaptersTest do
     }
 
     test "extracts content, tokens, cost from provider" do
-      o = OpenRouter.outcome(@resp)
+      o = Result.from_openai(@resp)
       assert o.content == "hello"
       assert o.finish_reason == "stop"
       assert o.stop_kind == :stop
@@ -108,7 +118,7 @@ defmodule PromptOnSDK.AdaptersTest do
           "cost_details" => %{"upstream_inference_cost" => 0.5}
         })
 
-      o = OpenRouter.outcome(resp)
+      o = Result.from_openai(resp)
       assert o.cost_usd == 0.5
       assert o.is_byok == true
       assert o.cost_source == :provider
@@ -120,27 +130,27 @@ defmodule PromptOnSDK.AdaptersTest do
         |> Map.delete("usage")
         |> put_in(["choices", Access.at(0), "finish_reason"], "length")
 
-      o = OpenRouter.outcome(resp)
+      o = Result.from_openai(resp)
       assert o.cost_usd == nil
       assert o.cost_source == :unknown
       assert o.usage.input_tokens == nil
       assert o.stop_kind == :length
 
       resp = put_in(@resp, ["choices", Access.at(0), "finish_reason"], "tool_calls")
-      assert OpenRouter.outcome(resp).stop_kind == :tool_call
+      assert Result.from_openai(resp).stop_kind == :tool_call
     end
 
     test "empty choices" do
-      o = OpenRouter.outcome(%{"choices" => []})
+      o = Result.from_openai(%{"choices" => []})
       assert o.content == nil
       assert o.stop_kind == :other
     end
   end
 
-  describe "Generic.outcome/1" do
+  describe "Result.from_generic/1" do
     test "normalizes atom or string keys" do
       o =
-        Generic.outcome(%{
+        Result.from_generic(%{
           "input_tokens" => 3,
           output_tokens: 0,
           content: "txt",
@@ -152,7 +162,7 @@ defmodule PromptOnSDK.AdaptersTest do
       assert o.stop_kind == :length
       assert o.cost_source == :unknown
 
-      o = Generic.outcome(%{input_tokens: 3, output_tokens: 0, cost_usd: 0.01})
+      o = Result.from_generic(%{input_tokens: 3, output_tokens: 0, cost_usd: 0.01})
       assert o.cost_source == :provider
       assert o.stop_kind == :other
     end

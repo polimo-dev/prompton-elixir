@@ -2,7 +2,7 @@ defmodule PromptOnSDK.UUIDv7 do
   @moduledoc """
   RFC 9562 UUIDv7 generator with no external dependencies.
 
-  The Generation `id` is an idempotency key the SDK issues up front (§5.7 `uuid_v7_primary_key`,
+  The log `id` is an idempotency key the SDK issues up front (§5.7 `uuid_v7_primary_key`,
   §6.4), so v7, which sorts chronologically, is used. Layout: 48-bit unix milliseconds | 4-bit
   version (7) | 12-bit random | 2-bit variant (10) | 62-bit random. Returned in lowercase hex
   with dashes (`019a…`).

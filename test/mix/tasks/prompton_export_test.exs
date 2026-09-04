@@ -10,11 +10,11 @@ defmodule Mix.Tasks.Prompton.ExportTest do
     :ok
   end
 
-  test "writes the snapshot body and a sidecar with etag/last_modified/environment/exported_at" do
-    out = tmp_path("priv/prompton/snapshot.json")
+  test "writes the use-case document body and a sidecar with etag/last_modified/environment/exported_at" do
+    out = tmp_path("priv/prompton/use-cases.production.json")
     body = Jason.encode!(Fixtures.snapshot())
 
-    FakeClient.set(:fetch_snapshot, fn nil, [receive_timeout: 15_000] ->
+    FakeClient.set(:fetch_use_cases, fn nil, [receive_timeout: 15_000] ->
       {:ok,
        %{
          status: 200,
@@ -57,19 +57,19 @@ defmodule Mix.Tasks.Prompton.ExportTest do
       System.delete_env("PTN_API_KEY")
     end)
 
-    FakeClient.set(:fetch_snapshot, fn _, _ ->
+    FakeClient.set(:fetch_use_cases, fn _, _ ->
       {:ok, %{status: 200, body: Fixtures.snapshot(), etag: "e", last_modified: nil}}
     end)
 
     Export.run(["--out", out])
     assert File.exists?(out)
-    assert {:ok, _, _} = PromptOnSDK.SnapshotData.decode_json(File.read!(out))
+    assert {:ok, _, _} = PromptOnSDK.UseCaseDocument.decode_json(File.read!(out))
   end
 
   test "failure leaves the existing file untouched and raises" do
     out = tmp_path("snap.json")
     File.write!(out, "old")
-    FakeClient.set(:fetch_snapshot, fn _, _ -> {:ok, %{status: 500, body: "boom"}} end)
+    FakeClient.set(:fetch_use_cases, fn _, _ -> {:ok, %{status: 500, body: "boom"}} end)
 
     assert_raise Mix.Error, ~r/existing file left untouched/, fn ->
       Export.run(["--out", out, "--base-url", "http://x/api/v1", "--api-key", "ptn_production_k"])
@@ -78,7 +78,7 @@ defmodule Mix.Tasks.Prompton.ExportTest do
     assert File.read!(out) == "old"
     refute File.exists?(out <> ".meta.json")
 
-    FakeClient.set(:fetch_snapshot, fn _, _ ->
+    FakeClient.set(:fetch_use_cases, fn _, _ ->
       {:ok, %{status: 200, body: "{bad", etag: nil, last_modified: nil}}
     end)
 

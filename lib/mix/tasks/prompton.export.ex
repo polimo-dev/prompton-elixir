@@ -1,12 +1,12 @@
 defmodule Mix.Tasks.Prompton.Export do
-  @shortdoc "Downloads the PromptOn snapshot into a bundle file (GET /snapshot)"
+  @shortdoc "Downloads the PromptOn use-case document into a bundle file (GET /use-cases)"
 
   @moduledoc """
-  Fetches `GET /snapshot` and saves it as a bundle file (plus a `<out>.meta.json` sidecar); this is
+  Fetches `GET /use-cases` and saves it as a bundle file (plus a `<out>.meta.json` sidecar); this is
   the last-resort fallback of §7.3. CI runs it on every build and commits the result to the repo:
   "even if PromptOn disappears, the app keeps running on the Release from the last export".
 
-      mix prompton.export [--out priv/prompton/snapshot.json] [--base-url URL] [--api-key KEY]
+      mix prompton.export [--out priv/prompton/use-cases.production.json] [--base-url URL] [--api-key KEY]
 
   Configuration precedence: flags, then the `PTN_BASE_URL` / `PTN_API_KEY` environment variables,
   then `config :prompton_sdk`.
@@ -17,10 +17,10 @@ defmodule Mix.Tasks.Prompton.Export do
 
   use Mix.Task
 
-  alias PromptOnSDK.{Config, SnapshotData}
+  alias PromptOnSDK.{Config, UseCaseDocument}
   alias PromptOnSDK.Snapshot.Store
 
-  @default_out "priv/prompton/snapshot.json"
+  @default_out "priv/prompton/use-cases.production.json"
 
   @impl Mix.Task
   def run(args) do
@@ -63,7 +63,7 @@ defmodule Mix.Tasks.Prompton.Export do
   def export(config, out) do
     with {:ok, %{status: 200} = resp} <- fetch(config),
          body = to_bytes(resp.body),
-         {:ok, data, _warnings} <- SnapshotData.decode_json(body),
+         {:ok, data, _warnings} <- UseCaseDocument.decode_json(body),
          now = DateTime.utc_now(),
          meta = %{
            "etag" => resp.etag,
@@ -81,7 +81,7 @@ defmodule Mix.Tasks.Prompton.Export do
   end
 
   defp fetch(config) do
-    config.client.fetch_snapshot(config, nil, receive_timeout: 15_000)
+    config.client.fetch_use_cases(config, nil, receive_timeout: 15_000)
   rescue
     e -> {:error, {:client_exception, e}}
   end
