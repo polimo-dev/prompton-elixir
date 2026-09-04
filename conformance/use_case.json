@@ -5,6 +5,7 @@
       "environment": "production",
       "expect": {
         "deployment_id": "0198f2a1-0000-7000-8000-00000000d001",
+        "key": "greeting",
         "kind": "chat",
         "messages": [
           {
@@ -40,6 +41,7 @@
           "sort": null
         },
         "revision": 3,
+        "source": "remote",
         "warnings": []
       },
       "name": "chat/default_prompt_without_variables",
@@ -51,6 +53,7 @@
       "environment": "production",
       "expect": {
         "deployment_id": "0198f2a1-0000-7000-8000-00000000d001",
+        "key": "greeting",
         "kind": "chat",
         "messages": [
           {
@@ -86,6 +89,7 @@
           "sort": null
         },
         "revision": 3,
+        "source": "remote",
         "warnings": []
       },
       "name": "chat/default_prompt_rendered",
@@ -99,6 +103,7 @@
       "environment": "production",
       "expect": {
         "deployment_id": "0198f2a1-0000-7000-8000-00000000d001",
+        "key": "greeting",
         "kind": "chat",
         "messages": [
           {
@@ -134,6 +139,7 @@
           "sort": null
         },
         "revision": 3,
+        "source": "remote",
         "warnings": []
       },
       "name": "chat/named_prompt_rendered",
@@ -149,6 +155,7 @@
       "environment": "production",
       "expect": {
         "deployment_id": "0198f2a1-0000-7000-8000-00000000d001",
+        "key": "greeting",
         "kind": "chat",
         "messages": [
           {
@@ -184,6 +191,7 @@
           "sort": null
         },
         "revision": 3,
+        "source": "remote",
         "warnings": []
       },
       "name": "chat/explicit_default_prompt_name",
@@ -210,6 +218,7 @@
       "environment": "production",
       "expect": {
         "error": "unknown_prompt",
+        "key": "greeting",
         "prompt": "fr",
         "prompt_names": [
           "default",
@@ -226,6 +235,7 @@
       "environment": "production",
       "expect": {
         "deployment_id": "0198f2a1-0000-7000-8000-00000000d002",
+        "key": "summarize",
         "kind": "text",
         "model": "openai/gpt-4o-mini",
         "model_id": "0198f2a1-0000-7000-8000-00000000e001",
@@ -248,6 +258,7 @@
           ]
         },
         "revision": 1,
+        "source": "remote",
         "text": "Summarize the following notes in one paragraph.\n- alpha\n- beta\n- gamma\n",
         "warnings": []
       },
@@ -266,6 +277,7 @@
       "environment": "production",
       "expect": {
         "deployment_id": "0198f2a1-0000-7000-8000-00000000d002",
+        "key": "summarize",
         "kind": "text",
         "model": "openai/gpt-4o-mini",
         "model_id": "0198f2a1-0000-7000-8000-00000000e001",
@@ -288,6 +300,7 @@
           ]
         },
         "revision": 1,
+        "source": "remote",
         "text": "Summarize the following notes in one paragraph.\n{% for item in items %}- {{ item }}\n{% endfor %}",
         "warnings": []
       },
@@ -299,6 +312,7 @@
       "environment": "production",
       "expect": {
         "deployment_id": "0198f2a1-0000-7000-8000-00000000d003",
+        "key": "embed",
         "kind": "embedding",
         "model": "openai/text-embedding-3-small",
         "model_id": "0198f2a1-0000-7000-8000-00000000e002",
@@ -311,6 +325,7 @@
         "provider": "openrouter",
         "provider_options": {},
         "revision": 2,
+        "source": "remote",
         "warnings": []
       },
       "name": "embedding/no_prompt",
@@ -322,6 +337,7 @@
       "environment": "production",
       "expect": {
         "deployment_id": "0198f2a1-0000-7000-8000-00000000d003",
+        "key": "embed",
         "kind": "embedding",
         "model": "openai/text-embedding-3-small",
         "model_id": "0198f2a1-0000-7000-8000-00000000e002",
@@ -334,6 +350,7 @@
         "provider": "openrouter",
         "provider_options": {},
         "revision": 2,
+        "source": "remote",
         "warnings": []
       },
       "name": "embedding/prompt_name_is_ignored",
@@ -354,7 +371,8 @@
       "document_ref": "production",
       "environment": "production",
       "expect": {
-        "error": "unknown_use_case"
+        "error": "unknown_use_case",
+        "key": "nope"
       },
       "name": "error/unknown_use_case",
       "use_case": "nope"
@@ -364,6 +382,7 @@
       "environment": "staging",
       "expect": {
         "deployment_id": "0198f2a1-0000-7000-8000-00000000d011",
+        "key": "greeting",
         "kind": "chat",
         "messages": [
           {
@@ -398,6 +417,7 @@
           ]
         },
         "revision": 7,
+        "source": "remote",
         "warnings": []
       },
       "name": "staging/same_use_case_different_pin",
@@ -412,6 +432,7 @@
       "environment": "staging",
       "expect": {
         "error": "unknown_prompt",
+        "key": "greeting",
         "prompt": "ko",
         "prompt_names": [
           "default"
@@ -426,6 +447,7 @@
       "environment": "production",
       "expect": {
         "deployment_id": "0198f2a1-0000-7000-8000-00000000d021",
+        "key": "greeting",
         "kind": "chat",
         "model": null,
         "model_id": null,
@@ -444,6 +466,7 @@
           ]
         },
         "revision": 1,
+        "source": "remote",
         "warnings": [
           "missing_prompt_version: 0198f2a1-0000-7000-8000-0000000000ff",
           "missing_model: 0198f2a1-0000-7000-8000-0000000000fe"
@@ -789,7 +812,7 @@
   },
   "format_version": 1,
   "generated_from": {
-    "commit": "544bdc53bcd1774a9ae8acf0e7790843da526323",
+    "commit": "14d4817832d8a906a461ad708f3245796f6be4b1",
     "language": "elixir",
     "repo": "https://github.com/polimo-dev/prompton-elixir",
     "sdk": "prompton_sdk",

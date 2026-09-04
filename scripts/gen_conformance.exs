@@ -476,9 +476,13 @@ defmodule GenConformance do
 
         %{
           "error" => "unknown_prompt",
+          "key" => use_case,
           "prompt" => prompt || Resolver.default_prompt(),
           "prompt_names" => prompts
         }
+
+      {:error, :unknown_use_case} ->
+        %{"error" => "unknown_use_case", "key" => use_case}
 
       {:error, reason} ->
         %{"error" => to_string(reason)}
@@ -492,6 +496,7 @@ defmodule GenConformance do
             {:ok, prompts} = Resolver.prompt_names(data, use_case)
 
             %{
+              "key" => r.use_case_key,
               "kind" => to_string(r.kind),
               "deployment_id" => r.deployment_id,
               "revision" => r.deployment_revision,
@@ -502,6 +507,7 @@ defmodule GenConformance do
               "provider" => r.provider && to_string(r.provider),
               "params" => r.params,
               "provider_options" => r.provider_options,
+              "source" => to_string(r.source),
               "prompt_version" =>
                 r.prompt_version_id &&
                   %{"id" => r.prompt_version_id, "number" => r.prompt_version_number},

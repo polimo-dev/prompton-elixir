@@ -256,44 +256,63 @@ defmodule PromptOnSDK.ConformanceTest do
   defp use_case_expectation(data, use_case, prompt, variables) do
     case Resolver.resolve(data, use_case, prompt: prompt) do
       {:error, :unknown_prompt} ->
-        {:ok, prompts} = Resolver.prompt_names(data, use_case)
+        unknown_prompt_expectation(data, use_case, prompt)
 
-        %{
-          "error" => "unknown_prompt",
-          "prompt" => prompt || Resolver.default_prompt(),
-          "prompt_names" => prompts
-        }
+      {:error, :unknown_use_case} ->
+        %{"error" => "unknown_use_case", "key" => use_case}
 
       {:error, reason} ->
         %{"error" => to_string(reason)}
 
       {:ok, r} ->
-        case fill_use_case(r, variables) do
-          {:error, {:missing_variable, name}} ->
-            %{"error" => "missing_variable", "variable" => name}
-
-          {:ok, rendered} ->
-            {:ok, prompts} = Resolver.prompt_names(data, use_case)
-
-            %{
-              "kind" => to_string(r.kind),
-              "deployment_id" => r.deployment_id,
-              "revision" => r.deployment_revision,
-              "prompt" => r.prompt,
-              "prompt_names" => prompts,
-              "model_id" => r.model_id,
-              "model" => r.model,
-              "provider" => r.provider && to_string(r.provider),
-              "params" => r.params,
-              "provider_options" => r.provider_options,
-              "prompt_version" =>
-                r.prompt_version_id &&
-                  %{"id" => r.prompt_version_id, "number" => r.prompt_version_number},
-              "warnings" => Enum.map(r.warnings, fn {tag, detail} -> "#{tag}: #{detail}" end)
-            }
-            |> Map.merge(rendered)
-        end
+        resolved_use_case_expectation(data, use_case, r, variables)
     end
+  end
+
+  defp unknown_prompt_expectation(data, use_case, prompt) do
+    {:ok, prompts} = Resolver.prompt_names(data, use_case)
+
+    %{
+      "error" => "unknown_prompt",
+      "key" => use_case,
+      "prompt" => prompt || Resolver.default_prompt(),
+      "prompt_names" => prompts
+    }
+  end
+
+  defp resolved_use_case_expectation(data, use_case, resolved, variables) do
+    case fill_use_case(resolved, variables) do
+      {:error, {:missing_variable, name}} ->
+        %{"error" => "missing_variable", "variable" => name}
+
+      {:ok, rendered} ->
+        {:ok, prompts} = Resolver.prompt_names(data, use_case)
+
+        resolved
+        |> resolved_use_case_fields(prompts)
+        |> Map.merge(rendered)
+    end
+  end
+
+  defp resolved_use_case_fields(r, prompts) do
+    %{
+      "key" => r.use_case_key,
+      "kind" => to_string(r.kind),
+      "deployment_id" => r.deployment_id,
+      "revision" => r.deployment_revision,
+      "prompt" => r.prompt,
+      "prompt_names" => prompts,
+      "model_id" => r.model_id,
+      "model" => r.model,
+      "provider" => r.provider && to_string(r.provider),
+      "params" => r.params,
+      "provider_options" => r.provider_options,
+      "source" => to_string(r.source),
+      "prompt_version" =>
+        r.prompt_version_id &&
+          %{"id" => r.prompt_version_id, "number" => r.prompt_version_number},
+      "warnings" => Enum.map(r.warnings, fn {tag, detail} -> "#{tag}: #{detail}" end)
+    }
   end
 
   defp fill_use_case(%{kind: :chat, messages: messages}, nil) when is_list(messages),
