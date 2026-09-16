@@ -4,8 +4,8 @@ defmodule PromptOnSDK.Payload do
   re-validates it, but the SDK has to apply it first so that the raw text never travels over the
   network ("if the SDK option is more conservative, the SDK wins").
 
-  The input is a **string-keyed** log map in the §6.4 format; the policy is the use-case document
-  UseCase's `payload_policy` (`%{mode: :full | :hash | :none, sample_rate: float, max_bytes: int}`;
+  The input is a **string-keyed** log map in the §6.4 format; the policy is the prompt document
+  Prompt's `payload_policy` (`%{mode: :full | :hash | :none, sample_rate: float, max_bytes: int}`;
   `config.payload_defaults` when `nil`).
 
   ## Order
@@ -71,7 +71,7 @@ defmodule PromptOnSDK.Payload do
     |> redact(config)
   end
 
-  @doc "Policy normalization (use-case document value ⊕ defaults). `sample_rate` is clamped to 0..1."
+  @doc "Policy normalization (prompt document value ⊕ defaults). `sample_rate` is clamped to 0..1."
   @spec normalize_policy(policy() | nil, map()) :: %{
           mode: atom(),
           sample_rate: float(),

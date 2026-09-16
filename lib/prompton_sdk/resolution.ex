@@ -10,9 +10,9 @@ defmodule PromptOnSDK.Resolution do
   @type source :: :remote | :disk | :bundle | :manual
 
   @type t :: %__MODULE__{
-          use_case_key: String.t(),
+          prompt_key: String.t(),
           kind: :chat | :text | :embedding,
-          prompt: String.t() | nil,
+          template: String.t() | nil,
           deployment_id: String.t() | nil,
           deployment_revision: non_neg_integer() | nil,
           prompt_version_id: String.t() | nil,
@@ -32,9 +32,9 @@ defmodule PromptOnSDK.Resolution do
           warnings: [term()]
         }
 
-  defstruct use_case_key: nil,
+  defstruct prompt_key: nil,
             kind: nil,
-            prompt: nil,
+            template: nil,
             deployment_id: nil,
             deployment_revision: nil,
             prompt_version_id: nil,

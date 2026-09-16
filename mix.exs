@@ -14,7 +14,7 @@ defmodule PromptOnSDK.MixProject do
       deps: deps(),
       name: "PromptOnSDK",
       description:
-        "PromptOn Elixir SDK — fetch deployed use cases, render messages/text, and log provider calls.",
+        "PromptOn Elixir SDK — fetch deployed prompts, render messages/text, and log provider calls.",
       package: package(),
       source_url: @source_url,
       docs: [main: "readme", extras: ["README.md", "CHANGELOG.md"]]

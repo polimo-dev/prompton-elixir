@@ -4,9 +4,9 @@ defmodule PromptOnSDKTest do
   test "core modules are loaded" do
     for mod <- [
           PromptOnSDK,
-          PromptOnSDK.UseCase,
+          PromptOnSDK.Prompt,
           PromptOnSDK.Result,
-          PromptOnSDK.UseCaseDocument,
+          PromptOnSDK.PromptDocument,
           PromptOnSDK.Template,
           PromptOnSDK.StopKind,
           PromptOnSDK.Params

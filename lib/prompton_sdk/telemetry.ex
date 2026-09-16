@@ -1,10 +1,10 @@
 defmodule PromptOnSDK.Telemetry do
   @moduledoc false
 
-  @use_case_document_updated [:prompton, :use_case_document, :updated]
-  @use_case_document_stale [:prompton, :use_case_document, :stale]
-  @use_case_document_fetch_error [:prompton, :use_case_document, :fetch_error]
-  @use_case_stop [:prompton, :use_case, :stop]
+  @prompt_document_updated [:prompton, :prompt_document, :updated]
+  @prompt_document_stale [:prompton, :prompt_document, :stale]
+  @prompt_document_fetch_error [:prompton, :prompt_document, :fetch_error]
+  @prompt_stop [:prompton, :prompt, :stop]
   @log_start [:prompton, :log, :start]
   @log_stop [:prompton, :log, :stop]
   @log_exception [:prompton, :log, :exception]
@@ -12,10 +12,10 @@ defmodule PromptOnSDK.Telemetry do
   @log_dropped [:prompton, :log, :dropped]
   @log_error [:prompton, :log, :error]
 
-  def use_case_document_updated, do: @use_case_document_updated
-  def use_case_document_stale, do: @use_case_document_stale
-  def use_case_document_fetch_error, do: @use_case_document_fetch_error
-  def use_case_stop, do: @use_case_stop
+  def prompt_document_updated, do: @prompt_document_updated
+  def prompt_document_stale, do: @prompt_document_stale
+  def prompt_document_fetch_error, do: @prompt_document_fetch_error
+  def prompt_stop, do: @prompt_stop
   def log_start, do: @log_start
   def log_stop, do: @log_stop
   def log_exception, do: @log_exception
@@ -27,10 +27,10 @@ defmodule PromptOnSDK.Telemetry do
   @spec events() :: [[atom()]]
   def events do
     [
-      @use_case_document_updated,
-      @use_case_document_stale,
-      @use_case_document_fetch_error,
-      @use_case_stop,
+      @prompt_document_updated,
+      @prompt_document_stale,
+      @prompt_document_fetch_error,
+      @prompt_stop,
       @log_start,
       @log_stop,
       @log_exception,

@@ -3,7 +3,7 @@ defmodule PromptOnSDK.FakeClient do
   A `PromptOnSDK.Client` implementation for tests: handlers are planted in an Agent, no Mox needed.
 
       start_supervised!(PromptOnSDK.FakeClient)
-      PromptOnSDK.FakeClient.set(:fetch_use_cases, fn etag, _opts -> {:ok, %{status: 304}} end)
+      PromptOnSDK.FakeClient.set(:fetch_prompts, fn etag, _opts -> {:ok, %{status: 304}} end)
       PromptOnSDK.FakeClient.set(:post_logs, fn items ->
         {:ok, %{status: 202, body: %{}, headers: %{}}}
       end)
@@ -23,7 +23,7 @@ defmodule PromptOnSDK.FakeClient do
 
   def child_spec(_), do: %{id: __MODULE__, start: {__MODULE__, :start_link, [[]]}}
 
-  def set(name, fun) when name in [:fetch_use_cases, :post_logs, :post_feedback] do
+  def set(name, fun) when name in [:fetch_prompts, :post_logs, :post_feedback] do
     Agent.update(__MODULE__, &put_in(&1, [:handlers, name], fun))
   end
 
@@ -36,8 +36,8 @@ defmodule PromptOnSDK.FakeClient do
   def reset, do: Agent.update(__MODULE__, &%{&1 | handlers: %{}, calls: []})
 
   @impl true
-  def fetch_use_cases(_config, etag, opts \\ []) do
-    call(:fetch_use_cases, [etag, opts])
+  def fetch_prompts(_config, etag, opts \\ []) do
+    call(:fetch_prompts, [etag, opts])
   end
 
   @impl true

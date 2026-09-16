@@ -1,9 +1,9 @@
 defmodule PromptOnSDK.Fixtures do
   @moduledoc """
-  Reference use-case document for tests (§6.2 format **v4**, HeyDiary mapping). A string-keyed
+  Reference prompt document for tests (§6.2 format **v4**, HeyDiary mapping). A string-keyed
   map, the same shape as a `Jason.decode/1` result.
 
-  A deployment is a pin, not a router: one model per use case plus one version pin per prompt name.
+  A deployment is a pin, not a router: one model per prompt plus one version pin per template name.
 
   * `diary_generation`: chat. Two pins (`default` = English, `ko` = Korean). Model sonnet4,
     temperature 0.5
@@ -62,17 +62,17 @@ Append these new voice transcriptions:
   @doc "The whole id map."
   def ids, do: @ids
 
-  @doc "The diary_generation user prompt template."
+  @doc "The diary_generation user template template."
   def diary_user_template, do: @diary_user_template
 
-  @doc "The reference snapshot (string-keyed map, schema v4)."
+  @doc "The reference snapshot (string-keyed map, schema v5)."
   @spec snapshot() :: map()
   def snapshot do
     %{
-      "schema_version" => 4,
+      "schema_version" => 5,
       "project" => "heydiary",
       "environment" => "production",
-      "use_cases" => %{
+      "prompts" => %{
         "diary_generation" => %{
           "id" => id(:uc_diary),
           "kind" => "chat",
@@ -129,7 +129,7 @@ Append these new voice transcriptions:
           "model_id" => id(:m_sonnet4),
           "params" => %{"temperature" => 0.4},
           "provider_options" => %{"allow_fallbacks" => false},
-          "prompt_pins" => %{"default" => id(:pv_en), "ko" => id(:pv_ko)}
+          "template_pins" => %{"default" => id(:pv_en), "ko" => id(:pv_ko)}
         },
         "chat_response" => %{
           "id" => id(:d_chat),
@@ -137,7 +137,7 @@ Append these new voice transcriptions:
           "model_id" => id(:m_gpt5_mini),
           "params" => %{"max_tokens" => 1024},
           "provider_options" => %{},
-          "prompt_pins" => %{"default" => id(:pv_chat)}
+          "template_pins" => %{"default" => id(:pv_chat)}
         },
         "voice_transcription" => %{
           "id" => id(:d_stt),
@@ -145,7 +145,7 @@ Append these new voice transcriptions:
           "model_id" => id(:m_whisper),
           "params" => %{},
           "provider_options" => %{},
-          "prompt_pins" => %{"default" => id(:pv_stt)}
+          "template_pins" => %{"default" => id(:pv_stt)}
         },
         "diary_embedding" => %{
           "id" => id(:d_embed),
@@ -153,13 +153,13 @@ Append these new voice transcriptions:
           "model_id" => id(:m_embed),
           "params" => %{},
           "provider_options" => %{},
-          "prompt_pins" => %{}
+          "template_pins" => %{}
         }
       },
       "prompt_versions" => %{
         id(:pv_en) => %{
           "id" => id(:pv_en),
-          "prompt_id" => id(:p_diary_en),
+          "prompt_template_id" => id(:p_diary_en),
           "number" => 2,
           "engine" => "liquid",
           "messages" => [
@@ -170,7 +170,7 @@ Append these new voice transcriptions:
         },
         id(:pv_ko) => %{
           "id" => id(:pv_ko),
-          "prompt_id" => id(:p_diary_ko),
+          "prompt_template_id" => id(:p_diary_ko),
           "number" => 3,
           "engine" => "liquid",
           "messages" => [
@@ -184,7 +184,7 @@ Append these new voice transcriptions:
         },
         id(:pv_chat) => %{
           "id" => id(:pv_chat),
-          "prompt_id" => id(:p_chat),
+          "prompt_template_id" => id(:p_chat),
           "number" => 1,
           "engine" => "liquid",
           "messages" => [
@@ -198,7 +198,7 @@ Append these new voice transcriptions:
         },
         id(:pv_stt) => %{
           "id" => id(:pv_stt),
-          "prompt_id" => id(:p_stt),
+          "prompt_template_id" => id(:p_stt),
           "number" => 1,
           "engine" => "raw",
           "messages" => nil,
@@ -270,10 +270,10 @@ Append these new voice transcriptions:
     }
   end
 
-  @doc "The decoded use-case document."
-  @spec snapshot_data() :: PromptOnSDK.UseCaseDocument.t()
+  @doc "The decoded prompt document."
+  @spec snapshot_data() :: PromptOnSDK.PromptDocument.t()
   def snapshot_data do
-    {:ok, data, []} = PromptOnSDK.UseCaseDocument.decode(snapshot())
+    {:ok, data, []} = PromptOnSDK.PromptDocument.decode(snapshot())
     data
   end
 end

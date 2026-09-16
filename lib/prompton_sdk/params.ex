@@ -2,7 +2,7 @@ defmodule PromptOnSDK.Params do
   @moduledoc """
   Shallow-merge helper for parameter maps.
 
-  Used to compute `params = UseCase.default_params ⊕ Deployment.params` and
+  Used to compute `params = Prompt.default_params ⊕ Deployment.params` and
   `provider_options = Model.provider_options ⊕ Deployment.provider_options` (§5.5).
   The server and the SDK share the same rules.
 
@@ -10,7 +10,7 @@ defmodule PromptOnSDK.Params do
 
   * **Shallow merge**: nested maps are not merged recursively; the override's value replaces them
     as a whole.
-  * **Keys are normalized to strings**: use-case documents use string keys while app code may use atom
+  * **Keys are normalized to strings**: prompt documents use string keys while app code may use atom
     keys, so `%{temperature: 0.7}` and `%{"temperature" => 0.5}` are treated as the same key.
   * **Explicit `nil` is preserved**: an app may need to send OpenRouter `provider.only: null`, so
     when an override puts `nil`, that key stays with a `nil` value (it is not deleted). The adapter

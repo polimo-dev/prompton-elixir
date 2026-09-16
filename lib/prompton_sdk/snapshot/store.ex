@@ -1,14 +1,14 @@
 defmodule PromptOnSDK.Snapshot.Store do
   @moduledoc false
 
-  alias PromptOnSDK.UseCaseDocument
+  alias PromptOnSDK.PromptDocument
 
   @key {PromptOnSDK, :snapshot}
 
   @type source :: :remote | :disk | :bundle | :manual
 
   @type entry :: %{
-          data: UseCaseDocument.t(),
+          data: PromptDocument.t(),
           etag: String.t() | nil,
           last_modified: String.t() | nil,
           source: source(),
@@ -23,15 +23,15 @@ defmodule PromptOnSDK.Snapshot.Store do
 
   @doc "Stores an entry."
   @spec put(entry()) :: :ok
-  def put(%{data: %UseCaseDocument{}} = entry), do: :persistent_term.put(@key, entry)
+  def put(%{data: %PromptDocument{}} = entry), do: :persistent_term.put(@key, entry)
 
   @doc "Erases the entry (tests / `PromptOnSDK.Test.clear/0`)."
   @spec erase() :: boolean()
   def erase, do: :persistent_term.erase(@key)
 
   @doc "Builds a new entry."
-  @spec new_entry(UseCaseDocument.t(), source(), keyword()) :: entry()
-  def new_entry(%UseCaseDocument{} = data, source, opts \\ []) do
+  @spec new_entry(PromptDocument.t(), source(), keyword()) :: entry()
+  def new_entry(%PromptDocument{} = data, source, opts \\ []) do
     %{
       data: data,
       etag: Keyword.get(opts, :etag),
@@ -50,7 +50,7 @@ defmodule PromptOnSDK.Snapshot.Store do
   @spec load_file(String.t(), source(), String.t() | nil) :: {:ok, entry()} | {:error, term()}
   def load_file(path, source, env_slug) do
     with {:ok, body} <- read_file(path),
-         {:ok, data, _warnings} <- UseCaseDocument.decode_json(body),
+         {:ok, data, _warnings} <- PromptDocument.decode_json(body),
          :ok <- guard_environment(data, env_slug) do
       meta = read_meta(path)
 
@@ -91,11 +91,11 @@ defmodule PromptOnSDK.Snapshot.Store do
   end
 
   @doc "Environment guard. Passes when `env_slug` is `nil`."
-  @spec guard_environment(UseCaseDocument.t(), String.t() | nil) ::
+  @spec guard_environment(PromptDocument.t(), String.t() | nil) ::
           :ok | {:error, {:environment_mismatch, String.t() | nil, String.t()}}
   def guard_environment(_data, nil), do: :ok
 
-  def guard_environment(%UseCaseDocument{environment: env}, env_slug) do
+  def guard_environment(%PromptDocument{environment: env}, env_slug) do
     if env == env_slug, do: :ok, else: {:error, {:environment_mismatch, env, env_slug}}
   end
 
@@ -111,7 +111,7 @@ defmodule PromptOnSDK.Snapshot.Store do
     if base, do: max(DateTime.diff(now, base, :second), 0), else: nil
   end
 
-  @doc "The `use_case_document_info/0` shape."
+  @doc "The `prompt_document_info/0` shape."
   @spec info(entry() | nil) :: map()
   def info(nil) do
     %{

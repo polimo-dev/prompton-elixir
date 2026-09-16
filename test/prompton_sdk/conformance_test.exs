@@ -10,10 +10,10 @@ defmodule PromptOnSDK.ConformanceTest do
 
   use ExUnit.Case, async: true
 
-  alias PromptOnSDK.{Payload, Resolver, StopKind, Template, UseCaseDocument}
+  alias PromptOnSDK.{Payload, PromptDocument, Resolver, StopKind, Template}
 
   @dir Path.expand("../../conformance", __DIR__)
-  @files ~w(template.json use_case.json truncation.json stop_kind.json log_record.json)
+  @files ~w(template.json prompt.json truncation.json stop_kind.json log_record.json)
 
   @payload_config %{
     payload_defaults: %{mode: :full, sample_rate: 1.0, max_bytes: 262_144},
@@ -21,7 +21,7 @@ defmodule PromptOnSDK.ConformanceTest do
     log: %{}
   }
 
-  @required_record_fields ~w(id use_case model status started_at)
+  @required_record_fields ~w(id prompt_key model status started_at)
   @error_kinds ~w(http_4xx http_5xx rate_limited timeout transport parse app)
   @stop_kinds ~w(stop length tool_call content_filter other)
   @kinds ~w(chat text embedding)
@@ -62,22 +62,22 @@ defmodule PromptOnSDK.ConformanceTest do
   end
 
   # ---------------------------------------------------------------------------
-  # use_case.json
+  # prompt.json
 
-  test "use_case.json: every use-case document decodes as schema v4" do
-    for {ref, raw} <- load("use_case.json")["documents"] do
-      assert {:ok, data, _warnings} = UseCaseDocument.decode(raw), "document #{ref}"
-      assert data.schema_version == UseCaseDocument.schema_version()
+  test "prompt.json: every prompt document decodes as schema v5" do
+    for {ref, raw} <- load("prompt.json")["documents"] do
+      assert {:ok, data, _warnings} = PromptDocument.decode(raw), "document #{ref}"
+      assert data.schema_version == PromptDocument.schema_version()
     end
   end
 
-  test "use_case.json: every use-case case matches" do
-    doc = load("use_case.json")
-    assert doc["default_prompt"] == Resolver.default_prompt()
+  test "prompt.json: every prompt case matches" do
+    doc = load("prompt.json")
+    assert doc["default_template"] == Resolver.default_template()
 
     documents =
       Map.new(doc["documents"], fn {ref, raw} ->
-        {:ok, data, _} = UseCaseDocument.decode(raw)
+        {:ok, data, _} = PromptDocument.decode(raw)
         {ref, data}
       end)
 
@@ -85,8 +85,8 @@ defmodule PromptOnSDK.ConformanceTest do
       data = Map.fetch!(documents, c["document_ref"])
       assert data.environment == c["environment"], "environment of #{c["name"]}"
 
-      actual = use_case_expectation(data, c["use_case"], c["prompt"], c["variables"])
-      assert actual == c["expect"], "use case #{c["name"]}"
+      actual = prompt_expectation(data, c["prompt_key"], c["template"], c["variables"])
+      assert actual == c["expect"], "prompt #{c["name"]}"
     end
   end
 
@@ -162,7 +162,7 @@ defmodule PromptOnSDK.ConformanceTest do
       assert String.at(r["id"], 14) == "7", "#{name}: id must be a UUIDv7, not a v4"
       assert r["status"] in ~w(ok error), "#{name}: status"
       assert {:ok, _dt, _offset} = DateTime.from_iso8601(r["started_at"]), "#{name}: started_at"
-      assert byte_size(r["use_case"]) <= 512, "#{name}: use_case"
+      assert byte_size(r["prompt_key"]) <= 512, "#{name}: prompt"
       assert byte_size(r["model"]) <= 512, "#{name}: model"
 
       assert_optional_enum(r["kind"], @kinds, "#{name}: kind")
@@ -253,55 +253,55 @@ defmodule PromptOnSDK.ConformanceTest do
     }
   end
 
-  defp use_case_expectation(data, use_case, prompt, variables) do
-    case Resolver.resolve(data, use_case, prompt: prompt) do
-      {:error, :unknown_prompt} ->
-        unknown_prompt_expectation(data, use_case, prompt)
+  defp prompt_expectation(data, prompt_key, template, variables) do
+    case Resolver.resolve(data, prompt_key, template: template) do
+      {:error, :unknown_template} ->
+        unknown_template_expectation(data, prompt_key, template)
 
-      {:error, :unknown_use_case} ->
-        %{"error" => "unknown_use_case", "key" => use_case}
+      {:error, :unknown_prompt} ->
+        %{"error" => "unknown_prompt", "key" => prompt_key}
 
       {:error, reason} ->
         %{"error" => to_string(reason)}
 
       {:ok, r} ->
-        resolved_use_case_expectation(data, use_case, r, variables)
+        resolved_prompt_expectation(data, prompt_key, r, variables)
     end
   end
 
-  defp unknown_prompt_expectation(data, use_case, prompt) do
-    {:ok, prompts} = Resolver.prompt_names(data, use_case)
+  defp unknown_template_expectation(data, prompt_key, template) do
+    {:ok, prompts} = Resolver.template_names(data, prompt_key)
 
     %{
-      "error" => "unknown_prompt",
-      "key" => use_case,
-      "prompt" => prompt || Resolver.default_prompt(),
-      "prompt_names" => prompts
+      "error" => "unknown_template",
+      "key" => prompt_key,
+      "template" => template || Resolver.default_template(),
+      "template_names" => prompts
     }
   end
 
-  defp resolved_use_case_expectation(data, use_case, resolved, variables) do
-    case fill_use_case(resolved, variables) do
+  defp resolved_prompt_expectation(data, prompt, resolved, variables) do
+    case fill_prompt(resolved, variables) do
       {:error, {:missing_variable, name}} ->
         %{"error" => "missing_variable", "variable" => name}
 
       {:ok, rendered} ->
-        {:ok, prompts} = Resolver.prompt_names(data, use_case)
+        {:ok, prompts} = Resolver.template_names(data, prompt)
 
         resolved
-        |> resolved_use_case_fields(prompts)
+        |> resolved_prompt_fields(prompts)
         |> Map.merge(rendered)
     end
   end
 
-  defp resolved_use_case_fields(r, prompts) do
+  defp resolved_prompt_fields(r, prompts) do
     %{
-      "key" => r.use_case_key,
+      "key" => r.prompt_key,
       "kind" => to_string(r.kind),
       "deployment_id" => r.deployment_id,
       "revision" => r.deployment_revision,
-      "prompt" => r.prompt,
-      "prompt_names" => prompts,
+      "template" => r.template,
+      "template_names" => prompts,
       "model_id" => r.model_id,
       "model" => r.model,
       "provider" => r.provider && to_string(r.provider),
@@ -315,10 +315,10 @@ defmodule PromptOnSDK.ConformanceTest do
     }
   end
 
-  defp fill_use_case(%{kind: :chat, messages: messages}, nil) when is_list(messages),
+  defp fill_prompt(%{kind: :chat, messages: messages}, nil) when is_list(messages),
     do: {:ok, %{"messages" => Enum.map(messages, &message_map/1)}}
 
-  defp fill_use_case(%{kind: :chat, messages: messages} = r, variables)
+  defp fill_prompt(%{kind: :chat, messages: messages} = r, variables)
        when is_list(messages) do
     case Template.render_messages(messages, variables, engine: r.engine || :liquid) do
       {:ok, rendered} -> {:ok, %{"messages" => Enum.map(rendered, &message_map/1)}}
@@ -326,10 +326,10 @@ defmodule PromptOnSDK.ConformanceTest do
     end
   end
 
-  defp fill_use_case(%{kind: :text, text_template: text}, nil) when is_binary(text),
+  defp fill_prompt(%{kind: :text, text_template: text}, nil) when is_binary(text),
     do: {:ok, %{"text" => text}}
 
-  defp fill_use_case(%{kind: :text, text_template: text} = r, variables)
+  defp fill_prompt(%{kind: :text, text_template: text} = r, variables)
        when is_binary(text) do
     case Template.render(text, variables, engine: r.engine || :liquid) do
       {:ok, rendered} -> {:ok, %{"text" => rendered}}
@@ -337,7 +337,7 @@ defmodule PromptOnSDK.ConformanceTest do
     end
   end
 
-  defp fill_use_case(_r, _variables), do: {:ok, %{}}
+  defp fill_prompt(_r, _variables), do: {:ok, %{}}
 
   defp message_map(m), do: %{"role" => m[:role], "content" => m[:content]}
 

@@ -38,7 +38,7 @@ defmodule PromptOnSDK.Template do
     body execution path), a `for` enumerable, `assign`, or `{{ }}` output is always an error.
     That is, "missing required variable = error" is guaranteed at **output positions**, while
     variables referenced only in condition expressions are caught by `variables/1` (the server's
-    `detected_variables`) and the UseCase `input_schema`.
+    `detected_variables`) and the Prompt `input_schema`.
   * The `default` filter does **not** rescue an undefined variable: `{{ x | default: "n" }}` is an
     error when the `x` key is absent altogether. A key whose value is `nil` (`%{"x" => nil}`)
     counts as defined and `default` applies ("n"). For optional variables, the app passes `nil`

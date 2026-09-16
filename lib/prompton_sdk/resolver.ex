@@ -1,34 +1,34 @@
 defmodule PromptOnSDK.Resolver do
   @moduledoc false
 
-  alias PromptOnSDK.{Params, Resolution, UseCaseDocument}
+  alias PromptOnSDK.{Params, PromptDocument, Resolution}
 
-  @type error :: :unknown_use_case | :unresolved | :unknown_prompt
+  @type error :: :unknown_prompt | :unresolved | :unknown_template
 
-  @default_prompt "default"
-
-  @doc false
-  @spec default_prompt() :: String.t()
-  def default_prompt, do: @default_prompt
+  @default_template "default"
 
   @doc false
-  @spec resolve(UseCaseDocument.t(), String.t() | atom(), keyword()) ::
+  @spec default_template() :: String.t()
+  def default_template, do: @default_template
+
+  @doc false
+  @spec resolve(PromptDocument.t(), String.t() | atom(), keyword()) ::
           {:ok, Resolution.t()} | {:error, error()}
-  def resolve(%UseCaseDocument{} = snapshot, use_case_key, opts \\ []) do
-    with {:ok, use_case} <- fetch_use_case(snapshot, to_key(use_case_key)),
-         {:ok, deployment} <- fetch_deployment(use_case),
-         {:ok, prompt_name, version_id} <- pick_prompt(use_case, deployment, opts[:prompt]) do
-      {:ok, build_resolution(snapshot, use_case, deployment, prompt_name, version_id, opts)}
+  def resolve(%PromptDocument{} = snapshot, prompt_key, opts \\ []) do
+    with {:ok, prompt} <- fetch_prompt(snapshot, to_key(prompt_key)),
+         {:ok, deployment} <- fetch_deployment(prompt),
+         {:ok, prompt_name, version_id} <- pick_prompt(prompt, deployment, opts[:template]) do
+      {:ok, build_resolution(snapshot, prompt, deployment, prompt_name, version_id, opts)}
     end
   end
 
   @doc false
-  @spec prompt_names(UseCaseDocument.t(), String.t() | atom()) ::
-          {:ok, [String.t()]} | {:error, :unknown_use_case}
-  def prompt_names(%UseCaseDocument{} = snapshot, use_case_key) do
-    with {:ok, use_case} <- fetch_use_case(snapshot, to_key(use_case_key)) do
-      case Map.get(use_case, :deployment) do
-        %{prompt_pins: pins} when is_map(pins) -> {:ok, pins |> Map.keys() |> Enum.sort()}
+  @spec template_names(PromptDocument.t(), String.t() | atom()) ::
+          {:ok, [String.t()]} | {:error, :unknown_prompt}
+  def template_names(%PromptDocument{} = snapshot, prompt_key) do
+    with {:ok, prompt} <- fetch_prompt(snapshot, to_key(prompt_key)) do
+      case Map.get(prompt, :deployment) do
+        %{template_pins: pins} when is_map(pins) -> {:ok, pins |> Map.keys() |> Enum.sort()}
         _ -> {:ok, []}
       end
     end
@@ -36,42 +36,42 @@ defmodule PromptOnSDK.Resolver do
 
   # ---------------------------------------------------------------------------
 
-  defp fetch_use_case(snapshot, key) do
-    case Map.fetch(snapshot.use_cases, key) do
-      {:ok, use_case} -> {:ok, use_case}
-      :error -> {:error, :unknown_use_case}
+  defp fetch_prompt(snapshot, key) do
+    case Map.fetch(snapshot.prompts, key) do
+      {:ok, prompt} -> {:ok, prompt}
+      :error -> {:error, :unknown_prompt}
     end
   end
 
-  defp fetch_deployment(use_case) do
-    case Map.get(use_case, :deployment) do
+  defp fetch_deployment(prompt) do
+    case Map.get(prompt, :deployment) do
       %{} = deployment -> {:ok, deployment}
       _ -> {:error, :unresolved}
     end
   end
 
-  # `kind :embedding` has no prompt: a given name is ignored and only the model is resolved.
+  # `kind :embedding` has no template: a given name is ignored and only the model is resolved.
   defp pick_prompt(%{kind: :embedding}, _deployment, _requested), do: {:ok, nil, nil}
 
-  defp pick_prompt(_use_case, deployment, requested) do
-    name = to_key(requested) || @default_prompt
+  defp pick_prompt(_prompt, deployment, requested) do
+    name = to_key(requested) || @default_template
 
-    case Map.fetch(deployment.prompt_pins || %{}, name) do
+    case Map.fetch(deployment.template_pins || %{}, name) do
       {:ok, version_id} -> {:ok, name, version_id}
-      :error -> {:error, :unknown_prompt}
+      :error -> {:error, :unknown_template}
     end
   end
 
-  defp build_resolution(snapshot, use_case, deployment, prompt_name, version_id, opts) do
+  defp build_resolution(snapshot, prompt, deployment, prompt_name, version_id, opts) do
     {prompt_version, warnings} =
       lookup(snapshot.prompt_versions, version_id, :missing_prompt_version, [])
 
     {model, warnings} = lookup(snapshot.models, deployment.model_id, :missing_model, warnings)
 
     %Resolution{
-      use_case_key: use_case.key,
-      kind: use_case.kind,
-      prompt: prompt_name,
+      prompt_key: prompt.key,
+      kind: prompt.kind,
+      template: prompt_name,
       deployment_id: deployment.id,
       deployment_revision: deployment.revision,
       prompt_version_id: prompt_version && prompt_version.id,
@@ -80,15 +80,15 @@ defmodule PromptOnSDK.Resolver do
       model_id: model && model.id,
       model: model && model.model_id,
       provider: model && model.provider,
-      params: Params.merge(use_case.default_params, deployment.params),
+      params: Params.merge(prompt.default_params, deployment.params),
       provider_options:
         Params.merge(model && model.provider_options, deployment.provider_options),
-      messages: template_messages(use_case.kind, prompt_version),
-      text_template: template_text(use_case.kind, prompt_version),
-      input_schema: use_case.input_schema,
+      messages: template_messages(prompt.kind, prompt_version),
+      text_template: template_text(prompt.kind, prompt_version),
+      input_schema: prompt.input_schema,
       source: Keyword.get(opts, :source, :remote),
       etag: Keyword.get(opts, :etag),
-      payload_policy: use_case.payload_policy,
+      payload_policy: prompt.payload_policy,
       warnings: warnings
     }
   end

@@ -1,13 +1,13 @@
 # PromptOnSDK
 
-PromptOn Elixir SDK — fetch the deployed use case, fill its messages/text,
+PromptOn Elixir SDK — fetch the deployed prompt, fill its messages/text,
 call the LLM **yourself**, and record a monitoring log. Thin by design (§7.1): PromptOn never sits in the
 request path, so an outage costs you nothing but fresher config.
 
 ```
-use_case(key, prompt: "ko") ──▶ %UseCase{key, kind, model, params, deployment, prompt, …}
-messages(use_case, vars) or text(use_case, vars) ─▶ provider input
-track(use_case, meta, fn -> call the provider end) ─▶ log recorded asynchronously
+prompt(key) ──▶ %Prompt{key, kind, model, params, deployment, template, …}
+messages(prompt, vars) or text(prompt, vars) ─▶ provider input
+track(prompt, meta, fn -> call the provider end) ─▶ log recorded asynchronously
 ```
 
 ## Installation
@@ -37,8 +37,8 @@ config :prompton_sdk,
   environment: "production",                               # which environment this app reads (default)
   base_url: "https://prompton.example/api/v1",
   poll_interval: :timer.seconds(10),                       # ETag polling
-  disk_cache: "/var/lib/myapp/prompton_use-cases.production.json",     # nil disables (k8s: emptyDir volume)
-  bundle: {:file, Application.app_dir(:myapp, "priv/prompton/use-cases.production.json")},  # last-resort fallback
+  disk_cache: "/var/lib/myapp/prompton_prompts.production.json",     # nil disables (k8s: emptyDir volume)
+  bundle: {:file, Application.app_dir(:myapp, "priv/prompton/prompts.production.json")},  # last-resort fallback
   log: [flush_interval: 2_000, flush_size: 100, flush_bytes: 1_000_000, max_buffer: 10_000,
         redact: &MyApp.AI.Redact.call/1],
   http: [receive_timeout: 5_000],                          # Req options
@@ -48,7 +48,7 @@ config :prompton_sdk,
 | key | default | notes |
 |---|---|---|
 | `api_key` | `nil` | `ptn_<project_slug>_…`; without it no remote calls are made |
-| `environment` | `"production"` | sent as `GET /use-cases?environment=…` and used as the disk/bundle guard |
+| `environment` | `"production"` | sent as `GET /prompts?environment=…` and used as the disk/bundle guard |
 | `base_url` | `nil` | trailing `/` trimmed |
 | `poll_interval` | 10 s | also the base of the failure backoff (×2 up to 5 min) |
 | `disk_cache` | `nil` | atomic tmp→rename; sidecar `<path>.meta.json` holds ETag / Last-Modified |
@@ -76,16 +76,16 @@ Options given here override the application env (`{PromptOnSDK, mode: :offline}`
 
 ```
 boot:  init loads disk cache, then bundle (synchronously, if present, valid and same environment)
-       handle_continue fetches GET /use-cases (3 s) — boot is never blocked
+       handle_continue fetches GET /prompts (3 s) — boot is never blocked
          200  → persistent_term + disk cache + sidecar          source: :remote
          fail → keep disk/bundle, poll in the background        source: :disk | :bundle  (stale telemetry with age)
-         nothing at all → use_case returns {:error, :not_ready} source: :none
+         nothing at all → prompt returns {:error, :not_ready} source: :none
 poll:  If-None-Match every poll_interval; 304 = no-op; 200 = swap; failures back off 10 s → 5 min
 ```
 
 The disk cache and bundle are refused with a warning when their `environment` differs from the configured
-`environment` (a `staging` app must not boot on a `production` bundle). `PromptOnSDK.use_case_document_info/0` reports
-`%{etag, last_modified, source, fetched_at, stale?, age_seconds}`; `PromptOnSDK.refresh_use_case_document/0`
+`environment` (a `staging` app must not boot on a `production` bundle). `PromptOnSDK.prompt_document_info/0` reports
+`%{etag, last_modified, source, fetched_at, stale?, age_seconds}`; `PromptOnSDK.refresh_prompt_document/0`
 re-fetches synchronously.
 
 ## Usage (Oban worker)
@@ -96,8 +96,8 @@ defmodule MyApp.Workers.SupportReply do
 
   @impl true
   def perform(%Oban.Job{id: job_id, attempt: attempt, args: %{"customer_ref" => customer_ref} = args}) do
-    with {:ok, r} <- PromptOnSDK.use_case("support_reply", prompt: args["language"] || "default"),
-         vars = %{question: args["question"], plan: args["plan"]},
+    with {:ok, r} <- PromptOnSDK.prompt("support_reply"),
+         vars = %{question: args["question"], language: args["language"] || "en", plan: args["plan"]},
          {:ok, msgs} <- PromptOnSDK.messages(r, vars) do
       PromptOnSDK.track(
         r,
@@ -128,8 +128,8 @@ defmodule MyApp.Workers.SupportReply do
       end
     else
       {:error, :not_ready} -> {:snooze, 5}
-      {:error, :unknown_use_case} -> {:cancel, :unknown_use_case}
       {:error, :unknown_prompt} -> {:cancel, :unknown_prompt}
+      {:error, :unknown_template} -> {:cancel, :unknown_template}
       {:error, :unresolved} -> {:error, :unresolved}
       {:error, {:missing_variable, name}} -> {:cancel, {:missing_variable, name}}
     end
@@ -141,62 +141,64 @@ end
 (`{:ok, result}` → `status ok`; `{:error, error}` → `status error`; `{:error, error, result}` → error **with**
 usage/output; exception → `error/app` and re-raise), builds the §6.4 log map and enqueues it. It always
 returns what your function returned. Pass the same `variables` to `track` if you want them logged.
-When `messages/3` or `text/3` renders with `prompt: "name"`, the SDK stores that prompt choice in
-process-local, one-shot state so the next `track/3` for the same use case records matching
-`prompt`/`prompt_version_id` evidence even if `track` meta omits `prompt:`. `track/3` consumes and
-clears that state; render failures, default renders, and explicit `track(..., prompt: ...)` also
+When `messages/3` or `text/3` renders with `template: "name"`, the SDK stores that template choice in
+process-local, one-shot state so the next `track/3` for the same prompt records matching
+`template`/`prompt_version_id` evidence even if `track` meta omits `template:`. `track/3` consumes and
+clears that state; render failures, default renders, and explicit `track(..., template: ...)` also
 clear/override it. Request context (language, plan, whatever you tag calls with) is a
 **log-only** passthrough now: hand it to `track` as `meta.context`.
 
-Other entry points: `PromptOnSDK.prompt_names/1` (which prompt names the live deployment pins),
+Other entry points: `PromptOnSDK.template_names/1` (which template names the live deployment pins),
 `PromptOnSDK.log_id/0` (pre-issued UUIDv7 for later scoring), `PromptOnSDK.log/1` (manual, e.g. after
 streaming), `PromptOnSDK.feedback/1` (`%{log_id, kind, value, …}`),
 `PromptOnSDK.Result.from_openai/1`, `PromptOnSDK.Result.from_anthropic/1`, and
 `PromptOnSDK.Result.from_generic/1` for provider/application result normalization.
 
-## Use-case document v4 — a deployment is a pin, not a router
+## Prompt document v5 — a deployment is a pin, not a router
 
-The SDK reads **schema v4 only**. A deployment revision no longer routes: no rules, no conditions, no targets,
-no weights, no A/B, no context dimensions. One revision is **one model** plus **one pinned prompt version per
-prompt name**:
+The SDK reads **schema v5 only**. A deployment revision no longer routes: no rules, no conditions, no targets,
+no weights, no A/B, no context dimensions. One revision is **one model** plus **one pinned template version per
+template name**:
 
 ```json
 "deployments": {
   "support_reply": {
     "id": "…", "revision": 7,
     "model_id": "…", "params": {"temperature": 0.3}, "provider_options": {"only": ["OpenAI"]},
-    "prompt_pins": {"default": "<prompt version id>", "ko": "<prompt version id>"}
+    "template_pins": {"default": "<prompt version id>", "ko": "<prompt version id>"}
   }
 }
 ```
 
-Selection at request time is the prompt name and nothing else:
+Selection at request time is the template name and nothing else:
 
 ```elixir
-{:ok, r} = PromptOnSDK.use_case("support_reply")                  # pin "default"
-{:ok, r} = PromptOnSDK.use_case("support_reply", prompt: "ko")    # pin "ko"
-{:ok, names} = PromptOnSDK.prompt_names("support_reply")         # ["default", "ko"]
+{:ok, r} = PromptOnSDK.prompt("support_reply")                  # pin "default"
+{:ok, r} = PromptOnSDK.prompt("support_reply", template: "ko")    # pin "ko"
+{:ok, names} = PromptOnSDK.template_names("support_reply")         # ["default", "ko"]
 ```
 
-A name the deployment does not pin is `{:error, :unknown_prompt}` — the SDK never falls back to `"default"`
+A name the deployment does not pin is `{:error, :unknown_template}` — the SDK never falls back to `"default"`
 silently, because shipping English to a `"ko"` request is worse than an error.
 
-| | v2 (deleted) | v4 |
+New apps should usually keep one default template per prompt and branch inside the template with variables such as `language`; named template pins remain supported by the local decoder and conformance suite for existing snapshots.
+
+| | v2 (deleted) | v5 |
 |---|---|---|
-| Config unit | `deployments[key].rules[]` with inline targets | `deployments[key]` = model + `prompt_pins` |
-| Request-time input | `ctx` map + `target_id` + `subject_key` | `prompt:` name |
+| Config unit | `deployments[key].rules[]` with inline targets | `deployments[key]` = model + `template_pins` |
+| Request-time input | `ctx` map + `target_id` + `subject_key` | `template: ` name |
 | A/B split | weighted targets | — (deploy a revision, roll back if it is worse) |
-| UseCase identity | `target_id`, `rule_id`, `deployment_id`, `deployment_revision` | `deployment_id`, `deployment_revision`, `prompt`, `prompt_version_id` |
-| Logged keys | `+ rule_id`, `target_id` | `deployment_id`, `deployment_revision`, `prompt`, `prompt_version_id` |
+| Prompt identity | `target_id`, `rule_id`, `deployment_id`, `deployment_revision` | `deployment_id`, `deployment_revision`, `template`, `prompt_version_id` |
+| Logged keys | `+ rule_id`, `target_id` | `prompt_key`, `deployment_id`, `deployment_revision`, `template`, `prompt_version_id` |
 
 Everything else is unchanged: `default_params ⊕ deployment params`, `model.provider_options ⊕ deployment
 provider_options`, templates, ETag polling, disk/bundle fallback, monitoring-log envelope. v1/v2 documents (a stale disk
 cache or an old repo bundle) are refused with `{:error, {:unsupported_schema_version, n}}` and the SDK keeps
-polling for a v4 one.
+polling for a v5 one.
 
 ## Logging pipeline
 
-`log/1` never raises. Before enqueueing, the SDK applies the use case's `payload_policy` from the use-case document
+`log/1` never raises. Before enqueueing, the SDK applies the prompt's `payload_policy` from the prompt document
 (`PromptOnSDK.Payload`): string `input`/`output` are always wrapped as objects (`{"text": …}` /
 `{"content": …}`); `mode :none` drops input/output; `:hash` replaces them with the pre-hashed wrapper
 `{"sha256": hex, "bytes": n, "hashed": true}` (the server stores the hash and never sees the text); `:full`
@@ -235,23 +237,23 @@ end
 
 test "records a log" do
   assert :ok = perform_job(MyApp.Workers.SupportReply, %{...})        # runs in the test process
-  gen = assert_logged(%{"use_case" => "support_reply", "status" => "ok"})
+  gen = assert_logged(%{"prompt_key" => "support_reply", "status" => "ok"})
   assert gen["usage"]["input_tokens"] == 100
 end
 ```
 
-`PromptOnSDK.Test.put_use_case_document/1` accepts a full use-case document map, `{:file, path}` or
-a decoded `PromptOnSDK.UseCaseDocument.t()`.
+`PromptOnSDK.Test.put_prompt_document/1` accepts a full prompt document map, `{:file, path}` or
+a decoded `PromptOnSDK.PromptDocument.t()`.
 In `:test` mode `log/1` sends `{:prompton_log, gen}` (and `feedback/1` `{:prompton_feedback, map}`)
 to the calling process instead of the buffer.
 
 ## Bundle export
 
 ```
-mix prompton.export --out priv/prompton/use-cases.production.json [--base-url URL] [--api-key KEY]
+mix prompton.export --out priv/prompton/prompts.production.json [--base-url URL] [--api-key KEY]
 ```
 
-Fetches `GET /use-cases` (flags → `PTN_BASE_URL`/`PTN_API_KEY` env → app config) and writes the JSON
+Fetches `GET /prompts` (flags → `PTN_BASE_URL`/`PTN_API_KEY` env → app config) and writes the JSON
 plus `<out>.meta.json` (etag, last_modified, environment, exported_at). Run it in CI on every build and commit
 the result; on failure the task exits non-zero and leaves the existing file untouched.
 
@@ -259,14 +261,14 @@ the result; on failure the task exits non-zero and leaves the existing file unto
 
 | Layer | Modules |
 |---|---|
-| Pure core | `UseCaseDocument`, `Template`, `StopKind`, `Params` |
-| Runtime | `Supervisor`, `Config`, `Buffer`, `Client`, `Client.Req`, `Payload`, `UseCase`, `Result`, `UUIDv7` |
+| Pure core | `PromptDocument`, `Template`, `StopKind`, `Params` |
+| Runtime | `Supervisor`, `Config`, `Buffer`, `Client`, `Client.Req`, `Payload`, `Prompt`, `Result`, `UUIDv7` |
 | Adapters & tooling | `OpenRouter`, `Test`, `Mix.Tasks.Prompton.Export` |
 
 ## Conformance suite
 
 `conformance/` holds the cross-language contract every other PromptOn SDK (Python, Node.js, Go,
-Ruby, Java, Kotlin, Rust) must reproduce: template rendering, use case selection, monitoring-log
+Ruby, Java, Kotlin, Rust) must reproduce: template rendering, prompt selection, monitoring-log
 truncation, `stop_kind` normalisation and golden log records, as JSON files with expected
 values. They are generated by running this SDK (`mix run scripts/gen_conformance.exs`) and replayed
 through it by `test/prompton_sdk/conformance_test.exs`. See

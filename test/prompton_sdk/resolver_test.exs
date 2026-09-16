@@ -1,24 +1,24 @@
 defmodule PromptOnSDK.ResolverTest do
   @moduledoc """
-  Use case selection algorithm (snapshot v4): a deployment is a pin, not a router.
-  With no rules, conditions, targets, or weights, only three things need verifying: (1) prompt name
-  selection, (2) parameter merging, (3) the error/warning contract for what is missing (use case,
+  Prompt selection algorithm (snapshot v4): a deployment is a pin, not a router.
+  With no rules, conditions, targets, or weights, only three things need verifying: (1) template name
+  selection, (2) parameter merging, (3) the error/warning contract for what is missing (prompt,
   deployment, prompt, model).
   """
 
   use ExUnit.Case, async: true
 
-  alias PromptOnSDK.{Fixtures, Resolver, UseCaseDocument}
+  alias PromptOnSDK.{Fixtures, PromptDocument, Resolver}
 
   setup do
     %{snapshot: Fixtures.snapshot_data()}
   end
 
   describe "prompt selection" do
-    test "no :prompt resolves the \"default\" pin", %{snapshot: snapshot} do
+    test "no :template resolves the \"default\" pin", %{snapshot: snapshot} do
       assert {:ok, r} = Resolver.resolve(snapshot, "diary_generation")
 
-      assert r.prompt == "default"
+      assert r.template == "default"
       assert r.prompt_version_id == Fixtures.id(:pv_en)
       assert r.prompt_version_number == 2
       assert r.deployment_id == Fixtures.id(:d_diary)
@@ -28,12 +28,12 @@ defmodule PromptOnSDK.ResolverTest do
                r.messages
     end
 
-    test ":prompt selects the named pin (this is how language branching works now)", %{
+    test ":template selects the named pin (this is how language branching works now)", %{
       snapshot: snapshot
     } do
-      assert {:ok, r} = Resolver.resolve(snapshot, "diary_generation", prompt: "ko")
+      assert {:ok, r} = Resolver.resolve(snapshot, "diary_generation", template: "ko")
 
-      assert r.prompt == "ko"
+      assert r.template == "ko"
       assert r.prompt_version_id == Fixtures.id(:pv_ko)
       assert r.prompt_version_number == 3
 
@@ -41,32 +41,32 @@ defmodule PromptOnSDK.ResolverTest do
                r.messages
     end
 
-    test "an atom prompt name is accepted", %{snapshot: snapshot} do
-      assert {:ok, r} = Resolver.resolve(snapshot, :diary_generation, prompt: :ko)
-      assert r.prompt == "ko"
+    test "an atom template name is accepted", %{snapshot: snapshot} do
+      assert {:ok, r} = Resolver.resolve(snapshot, :diary_generation, template: :ko)
+      assert r.template == "ko"
     end
 
     test "a name the deployment does not pin is an error, never a silent default", %{
       snapshot: snapshot
     } do
-      assert {:error, :unknown_prompt} =
-               Resolver.resolve(snapshot, "diary_generation", prompt: "ja")
+      assert {:error, :unknown_template} =
+               Resolver.resolve(snapshot, "diary_generation", template: "ja")
 
-      assert {:error, :unknown_prompt} =
-               Resolver.resolve(snapshot, "chat_response", prompt: "ko")
+      assert {:error, :unknown_template} =
+               Resolver.resolve(snapshot, "chat_response", template: "ko")
     end
 
-    test "prompt_names/2 lists the pinned names", %{snapshot: snapshot} do
-      assert {:ok, ["default", "ko"]} = Resolver.prompt_names(snapshot, "diary_generation")
-      assert {:ok, ["default"]} = Resolver.prompt_names(snapshot, "chat_response")
-      assert {:ok, []} = Resolver.prompt_names(snapshot, "diary_embedding")
-      assert {:ok, []} = Resolver.prompt_names(snapshot, "transcript_revision")
-      assert {:error, :unknown_use_case} = Resolver.prompt_names(snapshot, "nope")
+    test "template_names/2 lists the pinned names", %{snapshot: snapshot} do
+      assert {:ok, ["default", "ko"]} = Resolver.template_names(snapshot, "diary_generation")
+      assert {:ok, ["default"]} = Resolver.template_names(snapshot, "chat_response")
+      assert {:ok, []} = Resolver.template_names(snapshot, "diary_embedding")
+      assert {:ok, []} = Resolver.template_names(snapshot, "transcript_revision")
+      assert {:error, :unknown_prompt} = Resolver.template_names(snapshot, "nope")
     end
   end
 
   describe "kinds" do
-    test "text use case carries text_template and no messages", %{snapshot: snapshot} do
+    test "text prompt carries text_template and no messages", %{snapshot: snapshot} do
       assert {:ok, r} = Resolver.resolve(snapshot, "voice_transcription")
 
       assert r.kind == :text
@@ -75,11 +75,11 @@ defmodule PromptOnSDK.ResolverTest do
       assert r.engine == :raw
     end
 
-    test "embedding use case has no prompt at all and ignores :prompt", %{snapshot: snapshot} do
-      assert {:ok, r} = Resolver.resolve(snapshot, "diary_embedding", prompt: "ko")
+    test "embedding prompt has no template at all and ignores :template", %{snapshot: snapshot} do
+      assert {:ok, r} = Resolver.resolve(snapshot, "diary_embedding", template: "ko")
 
       assert r.kind == :embedding
-      assert r.prompt == nil
+      assert r.template == nil
       assert r.prompt_version_id == nil
       assert r.messages == nil
       assert r.text_template == nil
@@ -88,12 +88,12 @@ defmodule PromptOnSDK.ResolverTest do
   end
 
   describe "effective params" do
-    test "deployment params/provider_options override use case and model defaults", %{
+    test "deployment params/provider_options override prompt and model defaults", %{
       snapshot: snapshot
     } do
       assert {:ok, r} = Resolver.resolve(snapshot, "diary_generation")
 
-      # use case default_params temperature 0.5 ⊕ deployment 0.4
+      # prompt default_params temperature 0.5 ⊕ deployment 0.4
       assert r.params == %{"temperature" => 0.4}
       # model provider_options only:[Anthropic] ⊕ deployment allow_fallbacks:false
       assert r.provider_options == %{
@@ -106,7 +106,7 @@ defmodule PromptOnSDK.ResolverTest do
       assert r.provider == :openrouter
     end
 
-    test "use case defaults survive when the deployment adds a different key", %{
+    test "prompt defaults survive when the deployment adds a different key", %{
       snapshot: snapshot
     } do
       assert {:ok, r} = Resolver.resolve(snapshot, "chat_response")
@@ -115,20 +115,20 @@ defmodule PromptOnSDK.ResolverTest do
   end
 
   describe "errors and warnings" do
-    test "unknown use case", %{snapshot: snapshot} do
-      assert {:error, :unknown_use_case} = Resolver.resolve(snapshot, "nope")
+    test "unknown prompt", %{snapshot: snapshot} do
+      assert {:error, :unknown_prompt} = Resolver.resolve(snapshot, "nope")
     end
 
-    test "a use case with no deployment is unresolved", %{snapshot: snapshot} do
+    test "a prompt with no deployment is unresolved", %{snapshot: snapshot} do
       assert {:error, :unresolved} = Resolver.resolve(snapshot, "transcript_revision")
     end
 
-    test "a pin pointing at a missing prompt version warns and leaves the field nil" do
+    test "a pin pointing at a missing template version warns and leaves the field nil" do
       snapshot =
         Fixtures.snapshot()
         |> update_in(["prompt_versions"], &Map.delete(&1, Fixtures.id(:pv_en)))
 
-      {:ok, data, _} = UseCaseDocument.decode(snapshot)
+      {:ok, data, _} = PromptDocument.decode(snapshot)
 
       assert {:ok, r} = Resolver.resolve(data, "diary_generation")
       assert r.prompt_version_id == nil
@@ -140,13 +140,13 @@ defmodule PromptOnSDK.ResolverTest do
       snapshot =
         Fixtures.snapshot() |> update_in(["models"], &Map.delete(&1, Fixtures.id(:m_sonnet4)))
 
-      {:ok, data, _} = UseCaseDocument.decode(snapshot)
+      {:ok, data, _} = PromptDocument.decode(snapshot)
 
       assert {:ok, r} = Resolver.resolve(data, "diary_generation")
       assert r.model == nil
       assert r.model_id == nil
       assert r.warnings == [{:missing_model, Fixtures.id(:m_sonnet4)}]
-      # UseCase defaults are kept even when the model is missing
+      # Prompt defaults are kept even when the model is missing
       assert r.params == %{"temperature" => 0.4}
     end
   end
@@ -160,7 +160,7 @@ defmodule PromptOnSDK.ResolverTest do
       assert r.etag == "W/\"abc\""
     end
 
-    test "source defaults to :remote and payload policy comes from the use case", %{
+    test "source defaults to :remote and payload policy comes from the prompt", %{
       snapshot: snapshot
     } do
       assert {:ok, r} = Resolver.resolve(snapshot, "diary_generation")

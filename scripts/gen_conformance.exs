@@ -8,7 +8,7 @@
 # only field that changes between runs is `generated_from.commit`.
 
 defmodule GenConformance do
-  alias PromptOnSDK.{Payload, Resolver, UseCaseDocument, StopKind, Template}
+  alias PromptOnSDK.{Payload, Resolver, PromptDocument, StopKind, Template}
 
   @out_dir Path.expand("../conformance", __DIR__)
 
@@ -19,7 +19,7 @@ defmodule GenConformance do
     File.mkdir_p!(@out_dir)
 
     write("template.json", template())
-    write("use_case.json", use_case_cases())
+    write("prompt.json", prompt_cases())
     write("truncation.json", truncation())
     write("stop_kind.json", stop_kind())
     write("log_record.json", log_record())
@@ -168,7 +168,7 @@ defmodule GenConformance do
       [
         {"nonnormative/unknown_filter_is_applied_at_render_time", "{{ s | upcase }}",
          %{"s" => "abc"},
-         "The filter whitelist is enforced by lint/1 (and by the server when a prompt version is committed), NOT by render. solid applies any filter it knows. An SDK whose template engine only implements size/join/default may raise instead; both are acceptable, because such a template can never be committed to PromptOn."},
+         "The filter whitelist is enforced by lint/1 (and by the server when a template version is committed), NOT by render. solid applies any filter it knows. An SDK whose template engine only implements size/join/default may raise instead; both are acceptable, because such a template can never be committed to PromptOn."},
         {"nonnormative/whitespace_control_renders", "{%- if a -%}x{%- endif -%}", %{"a" => true},
          "Whitespace control is rejected by lint/1 but the renderer honours it. Behaviour of a template that lint rejects is unspecified."},
         {"nonnormative/map_value_stringification", "{{ m }}", %{"m" => %{"a" => 1}},
@@ -283,7 +283,7 @@ defmodule GenConformance do
   end
 
   # ==========================================================================
-  # use_case.json
+  # prompt.json
 
   # Fixed ids so the file is byte-stable.
   @uc_greeting "0198f2a1-0000-7000-8000-00000000c001"
@@ -306,7 +306,7 @@ defmodule GenConformance do
   @prompt_greeting "0198f2a1-0000-7000-8000-00000000b001"
   @prompt_summarize "0198f2a1-0000-7000-8000-00000000b002"
 
-  defp use_case_cases do
+  defp prompt_cases do
     documents = %{
       "production" => production_document(),
       "staging" => staging_document(),
@@ -315,193 +315,194 @@ defmodule GenConformance do
 
     decoded =
       Map.new(documents, fn {ref, raw} ->
-        {:ok, data, _warnings} = UseCaseDocument.decode(raw)
+        {:ok, data, _warnings} = PromptDocument.decode(raw)
         {ref, data}
       end)
 
     cases =
       [
         %{
-          name: "chat/default_prompt_without_variables",
+          name: "chat/default_template_without_variables",
           ref: "production",
-          use_case: "greeting",
+          prompt: "greeting",
           note: "with no variables the raw message templates come back unrendered"
         },
         %{
-          name: "chat/default_prompt_rendered",
+          name: "chat/default_template_rendered",
           ref: "production",
-          use_case: "greeting",
+          prompt: "greeting",
           variables: %{"name" => "Ada"}
         },
         %{
           name: "chat/named_prompt_rendered",
           ref: "production",
-          use_case: "greeting",
-          prompt: "ko",
+          prompt: "greeting",
+          template: "ko",
           variables: %{"name" => "아다"},
-          note: "the prompt name is the only selection axis; this is how language branching works"
+          note:
+            "the template name is the only selection axis; this is how language branching works"
         },
         %{
-          name: "chat/explicit_default_prompt_name",
+          name: "chat/explicit_default_template_name",
           ref: "production",
-          use_case: "greeting",
-          prompt: "default",
+          prompt: "greeting",
+          template: "default",
           variables: %{"name" => "Ada"}
         },
         %{
           name: "chat/missing_variable",
           ref: "production",
-          use_case: "greeting",
+          prompt: "greeting",
           variables: %{},
-          note: "use case selection succeeds; rendering fails"
+          note: "prompt selection succeeds; rendering fails"
         },
         %{
           name: "chat/unpinned_prompt_name",
           ref: "production",
-          use_case: "greeting",
-          prompt: "fr",
+          prompt: "greeting",
+          template: "fr",
           note: "never falls back to \"default\""
         },
         %{
           name: "text/rendered_with_for_loop",
           ref: "production",
-          use_case: "summarize",
+          prompt: "summarize",
           variables: %{"items" => ["alpha", "beta", "gamma"]}
         },
         %{
           name: "text/raw_template_without_variables",
           ref: "production",
-          use_case: "summarize"
+          prompt: "summarize"
         },
         %{
           name: "embedding/no_prompt",
           ref: "production",
-          use_case: "embed",
-          note: "kind embedding resolves the model only: prompt and prompt_version are null"
+          prompt: "embed",
+          note: "kind embedding resolves the model only: template and prompt_version are null"
         },
         %{
           name: "embedding/prompt_name_is_ignored",
           ref: "production",
-          use_case: "embed",
-          prompt: "ko",
-          note: "a prompt name given for an embedding use case is ignored, not an error"
+          prompt: "embed",
+          template: "ko",
+          note: "a template name given for an embedding prompt is ignored, not an error"
         },
         %{
-          name: "error/use_case_without_deployment",
+          name: "error/prompt_without_deployment",
           ref: "production",
-          use_case: "draft"
+          prompt: "draft"
         },
         %{
-          name: "error/unknown_use_case",
+          name: "error/unknown_prompt",
           ref: "production",
-          use_case: "nope"
+          prompt: "nope"
         },
         %{
-          name: "staging/same_use_case_different_pin",
+          name: "staging/same_prompt_different_pin",
           ref: "staging",
-          use_case: "greeting",
+          prompt: "greeting",
           variables: %{"name" => "Ada"},
-          note: "same key, different environment: different model, params and prompt version"
+          note: "same key, different environment: different model, params and template version"
         },
         %{
           name: "staging/prompt_pinned_only_in_production",
           ref: "staging",
-          use_case: "greeting",
-          prompt: "ko"
+          prompt: "greeting",
+          template: "ko"
         },
         %{
           name: "degraded/missing_prompt_version_and_model",
           ref: "degraded",
-          use_case: "greeting",
+          prompt: "greeting",
           note:
-            "the document references ids it does not contain: use case selection still succeeds, with warnings and null fields"
+            "the document references ids it does not contain: prompt selection still succeeds, with warnings and null fields"
         }
       ]
-      |> Enum.map(&use_case_case(&1, decoded))
+      |> Enum.map(&prompt_case(&1, decoded))
 
     %{
       "description" =>
-        "Use case selection: use-case document + use case (+ prompt name) -> which model, params " <>
-          "and prompt version to use, then filling when `variables` is present. This is " <>
-          "exactly what POST /api/v1/use-cases/{key}/prompt does on the server.",
+        "Prompt selection: prompt document + prompt (+ template name) -> which model, params " <>
+          "and template version to use, then filling when `variables` is present. This is " <>
+          "exactly what POST /api/v1/prompts/{key}/render does on the server.",
       "merge_semantics" => %{
-        "params" => "use_case.default_params <- deployment.params (shallow, later wins)",
+        "params" => "prompt.default_params <- deployment.params (shallow, later wins)",
         "provider_options" =>
           "model.provider_options <- deployment.provider_options (shallow, later wins)",
         "null_values" => "an override value of null is kept as null, not deleted"
       },
-      "default_prompt" => Resolver.default_prompt(),
+      "default_template" => Resolver.default_template(),
       "error_categories" => %{
-        "unknown_use_case" => "the document has no use case with that key",
-        "unresolved" => "the use case exists but has no deployment in this environment",
-        "unknown_prompt" =>
-          "the deployment pins no prompt version under that name (no fallback to \"default\")",
+        "unknown_prompt" => "the document has no prompt with that key",
+        "unresolved" => "the prompt exists but has no deployment in this environment",
+        "unknown_template" =>
+          "the deployment pins no template version under that name (no fallback to \"default\")",
         "missing_variable" =>
-          "use case selection succeeded but rendering needed a variable that was absent"
+          "prompt selection succeeded but rendering needed a variable that was absent"
       },
       "document_notes" => %{
         "production" =>
-          "The everyday shape: three deployed use cases (chat with two prompt names, text, embedding) plus one use case that has never been deployed. Field for field what GET /use-cases returns.",
+          "The everyday shape: three deployed prompts (chat with two template names, text, embedding) plus one prompt that has never been deployed. Field for field what GET /prompts returns.",
         "staging" =>
-          "The same project in another environment: one use case, a different revision, different params and only the default prompt pinned.",
+          "The same project in another environment: one prompt, a different revision, different params and only the default template pinned.",
         "degraded" =>
-          "Synthetic. The deployment points at a prompt version id and a model id the document does not contain, to pin down the warning path. A healthy server never emits this."
+          "Synthetic. The deployment points at a template version id and a model id the document does not contain, to pin down the warning path. A healthy server never emits this."
       },
       "documents" => documents,
       "cases" => cases
     }
   end
 
-  defp use_case_case(spec, decoded) do
+  defp prompt_case(spec, decoded) do
     data = Map.fetch!(decoded, spec.ref)
-    prompt = Map.get(spec, :prompt)
+    template = Map.get(spec, :template)
     variables = Map.get(spec, :variables)
 
     %{
       "name" => spec.name,
       "document_ref" => spec.ref,
       "environment" => data.environment,
-      "use_case" => spec.use_case,
-      "expect" => use_case_expect(data, spec.use_case, prompt, variables)
+      "prompt_key" => spec.prompt,
+      "expect" => prompt_expect(data, spec.prompt, template, variables)
     }
-    |> maybe_put("prompt", prompt)
+    |> maybe_put("template", template)
     |> maybe_put("variables", variables)
     |> maybe_put("note", Map.get(spec, :note))
   end
 
-  defp use_case_expect(data, use_case, prompt, variables) do
-    case Resolver.resolve(data, use_case, prompt: prompt) do
-      {:error, :unknown_prompt} ->
-        {:ok, prompts} = Resolver.prompt_names(data, use_case)
+  defp prompt_expect(data, prompt, template, variables) do
+    case Resolver.resolve(data, prompt, template: template) do
+      {:error, :unknown_template} ->
+        {:ok, prompts} = Resolver.template_names(data, prompt)
 
         %{
-          "error" => "unknown_prompt",
-          "key" => use_case,
-          "prompt" => prompt || Resolver.default_prompt(),
-          "prompt_names" => prompts
+          "error" => "unknown_template",
+          "key" => prompt,
+          "template" => template || Resolver.default_template(),
+          "template_names" => prompts
         }
 
-      {:error, :unknown_use_case} ->
-        %{"error" => "unknown_use_case", "key" => use_case}
+      {:error, :unknown_prompt} ->
+        %{"error" => "unknown_prompt", "key" => prompt}
 
       {:error, reason} ->
         %{"error" => to_string(reason)}
 
       {:ok, r} ->
-        case fill_use_case(r, variables) do
+        case fill_prompt(r, variables) do
           {:error, {:missing_variable, name}} ->
             %{"error" => "missing_variable", "variable" => name}
 
           {:ok, rendered} ->
-            {:ok, prompts} = Resolver.prompt_names(data, use_case)
+            {:ok, prompts} = Resolver.template_names(data, prompt)
 
             %{
-              "key" => r.use_case_key,
+              "key" => r.prompt_key,
               "kind" => to_string(r.kind),
               "deployment_id" => r.deployment_id,
               "revision" => r.deployment_revision,
-              "prompt" => r.prompt,
-              "prompt_names" => prompts,
+              "template" => r.template,
+              "template_names" => prompts,
               "model_id" => r.model_id,
               "model" => r.model,
               "provider" => r.provider && to_string(r.provider),
@@ -518,10 +519,10 @@ defmodule GenConformance do
     end
   end
 
-  defp fill_use_case(%{kind: :chat, messages: messages}, nil) when is_list(messages),
+  defp fill_prompt(%{kind: :chat, messages: messages}, nil) when is_list(messages),
     do: {:ok, %{"messages" => Enum.map(messages, &message_map/1)}}
 
-  defp fill_use_case(%{kind: :chat, messages: messages} = r, variables)
+  defp fill_prompt(%{kind: :chat, messages: messages} = r, variables)
        when is_list(messages) do
     case Template.render_messages(messages, variables, engine: r.engine || :liquid) do
       {:ok, rendered} -> {:ok, %{"messages" => Enum.map(rendered, &message_map/1)}}
@@ -529,10 +530,10 @@ defmodule GenConformance do
     end
   end
 
-  defp fill_use_case(%{kind: :text, text_template: text}, nil) when is_binary(text),
+  defp fill_prompt(%{kind: :text, text_template: text}, nil) when is_binary(text),
     do: {:ok, %{"text" => text}}
 
-  defp fill_use_case(%{kind: :text, text_template: text} = r, variables)
+  defp fill_prompt(%{kind: :text, text_template: text} = r, variables)
        when is_binary(text) do
     case Template.render(text, variables, engine: r.engine || :liquid) do
       {:ok, rendered} -> {:ok, %{"text" => rendered}}
@@ -540,7 +541,7 @@ defmodule GenConformance do
     end
   end
 
-  defp fill_use_case(_r, _variables), do: {:ok, %{}}
+  defp fill_prompt(_r, _variables), do: {:ok, %{}}
 
   defp message_map(message) do
     %{
@@ -561,10 +562,10 @@ defmodule GenConformance do
 
   defp production_document do
     %{
-      "schema_version" => 4,
+      "schema_version" => 5,
       "project" => "sdkfixture",
       "environment" => "production",
-      "use_cases" => %{
+      "prompts" => %{
         "greeting" => %{
           "id" => @uc_greeting,
           "kind" => "chat",
@@ -601,7 +602,7 @@ defmodule GenConformance do
           "model_id" => @model_chat,
           "params" => %{"temperature" => 0.2},
           "provider_options" => %{"allow_fallbacks" => true, "sort" => nil},
-          "prompt_pins" => %{"default" => @pv_greeting_default, "ko" => @pv_greeting_ko}
+          "template_pins" => %{"default" => @pv_greeting_default, "ko" => @pv_greeting_ko}
         },
         "summarize" => %{
           "id" => @dep_summarize_prod,
@@ -609,7 +610,7 @@ defmodule GenConformance do
           "model_id" => @model_chat,
           "params" => %{},
           "provider_options" => %{},
-          "prompt_pins" => %{"default" => @pv_summarize}
+          "template_pins" => %{"default" => @pv_summarize}
         },
         "embed" => %{
           "id" => @dep_embed_prod,
@@ -617,13 +618,13 @@ defmodule GenConformance do
           "model_id" => @model_embed,
           "params" => %{"dimensions" => 256},
           "provider_options" => %{},
-          "prompt_pins" => %{}
+          "template_pins" => %{}
         }
       },
       "prompt_versions" => %{
         @pv_greeting_default => %{
           "id" => @pv_greeting_default,
-          "prompt_id" => @prompt_greeting,
+          "prompt_template_id" => @prompt_greeting,
           "number" => 2,
           "engine" => "liquid",
           "messages" => [
@@ -634,7 +635,7 @@ defmodule GenConformance do
         },
         @pv_greeting_ko => %{
           "id" => @pv_greeting_ko,
-          "prompt_id" => @prompt_greeting,
+          "prompt_template_id" => @prompt_greeting,
           "number" => 1,
           "engine" => "liquid",
           "messages" => [
@@ -645,7 +646,7 @@ defmodule GenConformance do
         },
         @pv_summarize => %{
           "id" => @pv_summarize,
-          "prompt_id" => @prompt_summarize,
+          "prompt_template_id" => @prompt_summarize,
           "number" => 4,
           "engine" => "liquid",
           "messages" => [],
@@ -680,10 +681,10 @@ defmodule GenConformance do
 
   defp staging_document do
     %{
-      "schema_version" => 4,
+      "schema_version" => 5,
       "project" => "sdkfixture",
       "environment" => "staging",
-      "use_cases" => %{
+      "prompts" => %{
         "greeting" => %{
           "id" => @uc_greeting,
           "kind" => "chat",
@@ -699,13 +700,13 @@ defmodule GenConformance do
           "model_id" => @model_chat,
           "params" => %{"temperature" => 0.9, "top_p" => 0.8},
           "provider_options" => %{},
-          "prompt_pins" => %{"default" => @pv_greeting_stg}
+          "template_pins" => %{"default" => @pv_greeting_stg}
         }
       },
       "prompt_versions" => %{
         @pv_greeting_stg => %{
           "id" => @pv_greeting_stg,
-          "prompt_id" => @prompt_greeting,
+          "prompt_template_id" => @prompt_greeting,
           "number" => 3,
           "engine" => "liquid",
           "messages" => [
@@ -732,10 +733,10 @@ defmodule GenConformance do
 
   defp degraded_document do
     %{
-      "schema_version" => 4,
+      "schema_version" => 5,
       "project" => "sdkfixture",
       "environment" => "production",
-      "use_cases" => %{
+      "prompts" => %{
         "greeting" => %{
           "id" => @uc_greeting,
           "kind" => "chat",
@@ -751,7 +752,7 @@ defmodule GenConformance do
           "model_id" => @model_absent,
           "params" => %{},
           "provider_options" => %{"only" => ["OpenAI"]},
-          "prompt_pins" => %{"default" => @pv_absent}
+          "template_pins" => %{"default" => @pv_absent}
         }
       },
       "prompt_versions" => %{},
@@ -780,7 +781,7 @@ defmodule GenConformance do
           policy: %{mode: :full, max_bytes: 512},
           log: %{
             "id" => "0198f2a1-0000-7000-8000-000000001001",
-            "use_case" => "greeting",
+            "prompt_key" => "greeting",
             "status" => "ok",
             "input" => %{
               "messages" => [%{"role" => "user", "content" => "hi"}],
@@ -795,7 +796,7 @@ defmodule GenConformance do
           log: %{
             "id" => "0198f2a1-0000-7000-8000-000000001002",
             "status" => "ok",
-            "input" => "raw prompt text",
+            "input" => "raw template text",
             "output" => "raw completion text"
           },
           note: "a string input becomes {\"text\": …} and a string output {\"content\": …}"
@@ -960,7 +961,7 @@ defmodule GenConformance do
           log: %{
             "id" => "0198f2a1-0000-7000-8000-00000000100d",
             "status" => "ok",
-            "input" => "raw prompt text",
+            "input" => "raw template text",
             "output" => "raw completion text"
           },
           note: "wrapping happens before hashing, so the digest covers {\"text\":\"…\"}"
@@ -1214,10 +1215,10 @@ defmodule GenConformance do
   # log_record.json
 
   defp log_record do
-    use_case_chat = %PromptOnSDK.Resolution{
-      use_case_key: "greeting",
+    prompt_chat = %PromptOnSDK.Resolution{
+      prompt_key: "greeting",
       kind: :chat,
-      prompt: "default",
+      template: "default",
       deployment_id: @dep_greeting_prod,
       deployment_revision: 3,
       prompt_version_id: @pv_greeting_default,
@@ -1231,10 +1232,10 @@ defmodule GenConformance do
       source: :remote
     }
 
-    use_case_embed = %PromptOnSDK.Resolution{
-      use_case_key: "embed",
+    prompt_embed = %PromptOnSDK.Resolution{
+      prompt_key: "embed",
       kind: :embedding,
-      prompt: nil,
+      template: nil,
       deployment_id: @dep_embed_prod,
       deployment_revision: 2,
       model_id: @model_embed,
@@ -1257,7 +1258,7 @@ defmodule GenConformance do
         "description" => "A complete successful chat log with usage, cost and output.",
         "record" =>
           build_record(
-            use_case_chat,
+            prompt_chat,
             %{
               id: "0198f2a1-1111-7000-8000-000000000001",
               trace_id: "oban:8842",
@@ -1294,7 +1295,7 @@ defmodule GenConformance do
           "The provider call failed. status is error, there is no output or usage, and error.kind is one of the seven canonical kinds.",
         "record" =>
           build_record(
-            use_case_chat,
+            prompt_chat,
             %{
               id: "0198f2a1-1111-7000-8000-000000000002",
               trace_id: "oban:8843",
@@ -1315,7 +1316,7 @@ defmodule GenConformance do
           "The provider answered but the app could not parse the answer. status is error and the usage and output are still recorded, so the call still counts as spend and as a quality signal.",
         "record" =>
           build_record(
-            use_case_chat,
+            prompt_chat,
             %{
               id: "0198f2a1-1111-7000-8000-000000000003",
               trace_id: "oban:8844",
@@ -1338,10 +1339,10 @@ defmodule GenConformance do
         "name" => "embedding/success",
         "built_by" => "PromptOnSDK.track/3",
         "description" =>
-          "An embedding log: kind is embedding, there is no prompt or prompt_version_id, the input is text and only input_tokens are reported. source records that the use-case document came from the disk cache.",
+          "An embedding log: kind is embedding, there is no template or prompt_version_id, the input is text and only input_tokens are reported. source records that the prompt document came from the disk cache.",
         "record" =>
           build_record(
-            use_case_embed,
+            prompt_embed,
             %{
               id: "0198f2a1-1111-7000-8000-000000000004",
               trace_id: "ingest:2026-09-04:batch-7",
@@ -1363,7 +1364,7 @@ defmodule GenConformance do
         "name" => "text/manual_log_with_input_text",
         "built_by" => "hand-assembled map passed to PromptOnSDK.log/1",
         "description" =>
-          "A record an app assembles itself, for a streaming call or a background job that does not wrap the provider call. input.text carries a single prompt string instead of a message list, and the record is minimal: only the five required fields plus what the app knows.",
+          "A record an app assembles itself, for a streaming call or a background job that does not wrap the provider call. input.text carries a single template string instead of a message list, and the record is minimal: only the five required fields plus what the app knows.",
         "record" => manual_text_record()
       }
     ]
@@ -1409,10 +1410,10 @@ defmodule GenConformance do
           "the record id is the primary key: resending the identical batch returns duplicates instead of accepted, and stores nothing new"
       },
       "field_rules" => %{
-        "required" => ["id", "use_case", "model", "status", "started_at"],
+        "required" => ["id", "prompt_key", "model", "status", "started_at"],
         "id" =>
           "MUST be a UUIDv7 (version nibble 7). Request validation accepts any UUID string, but the database column is a UUIDv7 type and a v4 id fails on write: the record comes back in `rejected` with \"record could not be stored\". Generate v7 (48-bit unix milliseconds, then random) so records also sort by time.",
-        "use_case" => "the use case key, at most 512 bytes",
+        "prompt_key" => "the prompt key, at most 512 bytes",
         "model" => "the provider model string that was actually requested",
         "status" => "ok | error",
         "started_at" =>
@@ -1439,7 +1440,7 @@ defmodule GenConformance do
   defp manual_text_record do
     %{
       "id" => "0198f2a1-1111-7000-8000-000000000005",
-      "use_case" => "summarize",
+      "prompt_key" => "summarize",
       "kind" => "text",
       "model" => "openai/gpt-4o-mini",
       "provider" => "openrouter",
@@ -1447,7 +1448,7 @@ defmodule GenConformance do
       "started_at" => "2026-09-04T09:00:00.000000Z",
       "deployment_id" => @dep_summarize_prod,
       "deployment_revision" => 1,
-      "prompt" => "default",
+      "template" => "default",
       "prompt_version_id" => @pv_summarize,
       "model_id" => @model_chat,
       "source" => "bundle",
@@ -1463,10 +1464,10 @@ defmodule GenConformance do
     }
   end
 
-  defp build_record(use_case, meta, status, provider_result, error, latency_ms) do
+  defp build_record(prompt, meta, status, provider_result, error, latency_ms) do
     started_at = ~U[2026-09-04 09:00:00.000000Z]
 
-    use_case
+    prompt
     |> PromptOnSDK.Generation.build(
       meta,
       meta.id,

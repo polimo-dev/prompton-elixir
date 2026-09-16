@@ -15,8 +15,8 @@ defmodule PromptOnSDK.Generation do
 
     Telemetry.execute(Telemetry.log_start(), %{system_time: System.system_time()}, %{
       id: id,
-      use_case: r.use_case_key,
-      prompt: r.prompt,
+      prompt_key: r.prompt_key,
+      template: r.template,
       deployment_id: r.deployment_id,
       model: r.model,
       kind: r.kind,
@@ -41,8 +41,8 @@ defmodule PromptOnSDK.Generation do
         },
         %{
           id: id,
-          use_case: r.use_case_key,
-          prompt: r.prompt,
+          prompt_key: r.prompt_key,
+          template: r.template,
           deployment_id: r.deployment_id,
           model: r.model,
           status: status,
@@ -65,8 +65,8 @@ defmodule PromptOnSDK.Generation do
           %{duration: System.monotonic_time() - t0, latency_ms: gen["latency_ms"]},
           %{
             id: id,
-            use_case: r.use_case_key,
-            prompt: r.prompt,
+            prompt_key: r.prompt_key,
+            template: r.template,
             deployment_id: r.deployment_id,
             model: r.model,
             kind: kind,
@@ -109,12 +109,12 @@ defmodule PromptOnSDK.Generation do
 
     %{
       "id" => id,
-      "use_case" => r.use_case_key,
-      # Use-case evidence: the deployment revision and the chosen prompt. Keys whose value is
+      "prompt_key" => r.prompt_key,
+      # Prompt evidence: the deployment revision and the chosen template. Keys whose value is
       # nil are dropped entirely below.
       "deployment_id" => r.deployment_id,
       "deployment_revision" => r.deployment_revision,
-      "prompt" => r.prompt,
+      "template" => r.template,
       "prompt_version_id" => r.prompt_version_id,
       "source" => to_str(r.source),
       "context" => Params.stringify_keys(meta[:context] || %{}),

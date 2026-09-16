@@ -1,6 +1,6 @@
 defmodule PromptOnSDK.Result do
   @moduledoc """
-  Normalized provider result for `PromptOnSDK.UseCase.track/3`.
+  Normalized provider result for `PromptOnSDK.Prompt.track/3`.
   """
 
   @type t :: %__MODULE__{

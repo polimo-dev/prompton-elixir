@@ -8,7 +8,7 @@ defmodule PromptOnSDK.LiveFixtureIntegrationTest do
 
   use ExUnit.Case, async: false
 
-  alias PromptOnSDK.{Client, Config, Result, UseCase}
+  alias PromptOnSDK.{Client, Config, Prompt, Result}
   alias PromptOnSDK.Snapshot.Store
 
   @moduletag :live_fixture
@@ -37,52 +37,50 @@ defmodule PromptOnSDK.LiveFixtureIntegrationTest do
 
     opts = live_opts()
     start_supervised!({PromptOnSDK, opts})
-    assert :ok = PromptOnSDK.refresh_use_case_document()
+    assert :ok = PromptOnSDK.refresh_prompt_document()
 
     %{config: Config.load(opts)}
   end
 
-  test "GET /use-cases drives use_case/messages/text and remote prompt errors", %{
+  test "GET /prompts drives default prompt/messages/text and remote template errors", %{
     config: config
   } do
-    assert {:ok, %UseCase{} = use_case} =
-             PromptOnSDK.use_case("greeting", prompt: "ko")
+    assert {:ok, %Prompt{} = prompt} = PromptOnSDK.prompt("greeting")
 
-    assert use_case.source == :remote
-    assert use_case.prompt == "ko"
-    assert "ko" in use_case.prompt_names
+    assert prompt.source == :remote
+    assert prompt.template == "default"
+    assert prompt.template_names == ["default"]
 
     assert {:ok,
             [
               %{role: "system", content: system},
               %{role: "user", content: user}
             ]} =
-             PromptOnSDK.messages(use_case, %{name: "아다"})
+             PromptOnSDK.messages(prompt, %{name: "Ada", language: "ko"})
 
-    assert system =~ "친절한 인사 도우미"
-    assert user == "아다님에게 인사해줘."
+    assert system =~ "friendly greeter"
+    assert user == "Say hello to Ada."
 
-    assert {:ok, text_use_case} = PromptOnSDK.use_case("summarize")
-    assert {:ok, text} = PromptOnSDK.text(text_use_case, %{items: ["alpha", "beta"]})
+    assert {:ok, text_prompt} = PromptOnSDK.prompt("summarize")
+    assert {:ok, text} = PromptOnSDK.text(text_prompt, %{items: ["alpha", "beta"]})
     assert text =~ "- alpha"
     assert text =~ "- beta"
 
-    assert PromptOnSDK.use_case("does_not_exist") == {:error, :unknown_use_case}
+    assert PromptOnSDK.prompt("does_not_exist") == {:error, :unknown_prompt}
 
-    assert PromptOnSDK.use_case("greeting", prompt: "does_not_exist") ==
-             {:error, :unknown_prompt}
+    assert PromptOnSDK.prompt("greeting", template: "does_not_exist") ==
+             {:error, :unknown_template}
 
     assert {:ok, %{status: 200, body: remote}} =
              post_prompt(config, "greeting", %{
-               "prompt" => "ko",
-               "variables" => %{"name" => "아다"}
+               "variables" => %{"name" => "Ada", "language" => "ko"}
              })
 
     assert remote["key"] == "greeting"
     assert remote["source"] == "remote"
-    assert get_in(remote, ["messages", Access.at(0), "content"]) =~ "친절한 인사 도우미"
-    assert get_in(remote, ["messages", Access.at(1), "content"]) == "아다님에게 인사해줘."
-    assert remote["prompt"] == "ko"
+    assert get_in(remote, ["messages", Access.at(0), "content"]) =~ "friendly greeter"
+    assert get_in(remote, ["messages", Access.at(1), "content"]) == "Say hello to Ada."
+    assert remote["template"] == "default"
     assert is_binary(remote["prompt_version"]["id"])
 
     assert {:ok, %{status: status, body: body}} =
@@ -94,34 +92,34 @@ defmodule PromptOnSDK.LiveFixtureIntegrationTest do
 
     assert {:ok, %{status: status, body: body}} =
              post_prompt(config, "greeting", %{
-               "prompt" => "does_not_exist",
+               "template" => "does_not_exist",
                "variables" => %{"name" => "아다"}
              })
 
     assert status in [404, 422]
-    assert get_in(body, ["error", "details", "reason"]) == "unknown_prompt"
+    assert get_in(body, ["error", "details", "reason"]) == "unknown_template"
     assert get_in(body, ["error", "details", "key"]) == "greeting"
-    assert get_in(body, ["error", "details", "prompt_names"]) == ["default", "ko"]
+    assert get_in(body, ["error", "details", "template_names"]) == ["default"]
   end
 
   test "POST /logs accepts the first live fixture log and reports duplicate resend", %{
     config: config
   } do
-    assert {:ok, %UseCase{} = use_case} = PromptOnSDK.use_case("greeting")
+    assert {:ok, %Prompt{} = prompt} = PromptOnSDK.prompt("greeting")
 
     log = %{
       "id" => PromptOnSDK.log_id(),
-      "use_case" => use_case.key,
+      "prompt_key" => prompt.key,
       "kind" => "chat",
-      "model" => use_case.model,
-      "provider" => to_string(use_case.provider || :other),
+      "model" => prompt.model,
+      "provider" => to_string(prompt.provider || :other),
       "status" => "ok",
       "started_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
-      "deployment_id" => use_case.deployment.id,
-      "deployment_revision" => use_case.deployment.revision,
-      "prompt" => use_case.prompt,
-      "prompt_version_id" => use_case.prompt_version && use_case.prompt_version.id,
-      "model_id" => use_case.model_id,
+      "deployment_id" => prompt.deployment.id,
+      "deployment_revision" => prompt.deployment.revision,
+      "template" => prompt.template,
+      "prompt_version_id" => prompt.prompt_version && prompt.prompt_version.id,
+      "model_id" => prompt.model_id,
       "source" => "remote",
       "output" => %{"content" => "live fixture integration"},
       "finish_reason" => "stop",
@@ -142,15 +140,10 @@ defmodule PromptOnSDK.LiveFixtureIntegrationTest do
     assert second["rejected"] == []
   end
 
-  test "messages(prompt: name) feeds the next track/3 log evidence once" do
-    assert {:ok, default_use_case} = PromptOnSDK.use_case("greeting")
+  test "messages/2 feeds the next track/3 log evidence once" do
+    assert {:ok, default_template} = PromptOnSDK.prompt("greeting")
 
-    assert {:ok, msgs} =
-             PromptOnSDK.messages(
-               default_use_case,
-               %{name: "아다"},
-               prompt: "ko"
-             )
+    assert {:ok, msgs} = PromptOnSDK.messages(default_template, %{name: "Ada", language: "ko"})
 
     result = %Result{
       content: "ok",
@@ -160,7 +153,7 @@ defmodule PromptOnSDK.LiveFixtureIntegrationTest do
 
     assert {:ok, ^result} =
              PromptOnSDK.track(
-               default_use_case,
+               default_template,
                %{id: PromptOnSDK.log_id(), input_messages: msgs},
                fn ->
                  {:ok, result}
@@ -200,7 +193,7 @@ defmodule PromptOnSDK.LiveFixtureIntegrationTest do
     config
     |> Client.Req.base()
     |> Req.post(
-      url: "/use-cases/#{key}/prompt",
+      url: "/prompts/#{key}/render",
       params: [environment: config.environment],
       json: body
     )

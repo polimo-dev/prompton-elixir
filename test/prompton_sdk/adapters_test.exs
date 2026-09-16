@@ -1,17 +1,17 @@
 defmodule PromptOnSDK.AdaptersTest do
   use ExUnit.Case, async: true
 
-  alias PromptOnSDK.{Fixtures, OpenRouter, Resolver, Result, UseCase}
+  alias PromptOnSDK.{Fixtures, OpenRouter, Prompt, Resolver, Result}
 
   defp resolve(key, opts \\ []) do
     {:ok, r} = Resolver.resolve(Fixtures.snapshot_data(), key, opts)
-    {:ok, prompt_names} = Resolver.prompt_names(Fixtures.snapshot_data(), key)
-    UseCase.from_resolution(r, prompt_names)
+    {:ok, template_names} = Resolver.template_names(Fixtures.snapshot_data(), key)
+    Prompt.from_resolution(r, template_names)
   end
 
   describe "OpenRouter.request_body/3" do
     test "assembles model/messages/params/provider and usage.include" do
-      r = resolve("diary_generation", prompt: "ko")
+      r = resolve("diary_generation", template: "ko")
       msgs = [%{"role" => "user", "content" => "hi"}]
       body = OpenRouter.request_body(r, msgs, %{"max_tokens" => 2048})
 
@@ -63,7 +63,7 @@ defmodule PromptOnSDK.AdaptersTest do
       assert body["top_p"] == 0.9
     end
 
-    test "accepts only public UseCase structs" do
+    test "accepts only public Prompt structs" do
       {:ok, internal_resolution} = Resolver.resolve(Fixtures.snapshot_data(), "chat_response")
       request_body = Function.capture(OpenRouter, :request_body, 2)
 

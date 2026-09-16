@@ -1,16 +1,16 @@
-defmodule PromptOnSDK.UseCaseDocument do
+defmodule PromptOnSDK.PromptDocument do
   @moduledoc """
-  Decodes the `GET /use-cases` response into the SDK's use-case document structure.
+  Decodes the `GET /prompts` response into the SDK's prompt document structure.
 
-  The SDK reads **schema v4 only**. A document contains deployed use cases, their deployments,
-  pinned prompt versions, and model records. The decoded value is consumed by
-  `PromptOnSDK.use_case/2` and by test helpers.
+  The SDK reads **schema v5 only**. A document contains deployed prompts, their deployments,
+  pinned template versions, and model records. The decoded value is consumed by
+  `PromptOnSDK.prompt/2` and by test helpers.
 
   Atom-keyed maps are accepted for hand-written tests, but server responses and bundle files are
   expected to be JSON/string-keyed maps.
   """
 
-  @schema_version 4
+  @schema_version 5
   @kinds ~w(chat text embedding)
   @engines ~w(liquid raw)
   @payload_modes ~w(full hash none)
@@ -24,9 +24,9 @@ defmodule PromptOnSDK.UseCaseDocument do
   @atom_keys ~w(
     capabilities content context_length default_params deployments description display_name encrypt
     encrypt? engine environment example id input_schema kind max_bytes messages metadata mode
-    model_id models name number payload_policy pricing project prompt_id prompt_pins
+    model_id models name number payload_policy pricing project prompt_template_id template_pins
     prompt_versions provider provider_options required required? retention_days revision role
-    sample_rate schema_version status text_template use_cases
+    sample_rate schema_version status text_template prompts
   )
   @atom_key_lookup Map.new(@atom_keys, &{&1, String.to_atom(&1)})
 
@@ -34,15 +34,15 @@ defmodule PromptOnSDK.UseCaseDocument do
 
   @type deployment :: %{
           id: String.t() | nil,
-          use_case_key: String.t(),
+          prompt_key: String.t(),
           revision: integer() | nil,
           model_id: String.t() | nil,
           params: map(),
           provider_options: map(),
-          prompt_pins: %{String.t() => String.t()}
+          template_pins: %{String.t() => String.t()}
         }
 
-  @type use_case :: %{
+  @type prompt :: %{
           id: String.t() | nil,
           key: String.t(),
           kind: atom(),
@@ -54,10 +54,10 @@ defmodule PromptOnSDK.UseCaseDocument do
 
   @type prompt_version :: %{
           id: String.t(),
-          prompt_id: String.t() | nil,
+          prompt_template_id: String.t() | nil,
           number: integer() | nil,
           engine: :liquid | :raw,
-          messages: [PromptOnSDK.UseCase.message()] | nil,
+          messages: [PromptOnSDK.Prompt.message()] | nil,
           text_template: String.t() | nil
         }
 
@@ -78,7 +78,7 @@ defmodule PromptOnSDK.UseCaseDocument do
           schema_version: integer(),
           project: String.t() | nil,
           environment: String.t() | nil,
-          use_cases: %{String.t() => use_case()},
+          prompts: %{String.t() => prompt()},
           deployments: %{String.t() => deployment()},
           prompt_versions: %{String.t() => prompt_version()},
           models: %{String.t() => model()}
@@ -87,7 +87,7 @@ defmodule PromptOnSDK.UseCaseDocument do
   defstruct schema_version: @schema_version,
             project: nil,
             environment: nil,
-            use_cases: %{},
+            prompts: %{},
             deployments: %{},
             prompt_versions: %{},
             models: %{}
@@ -101,7 +101,7 @@ defmodule PromptOnSDK.UseCaseDocument do
   def decode_json(json) when is_binary(json) do
     case Jason.decode(json) do
       {:ok, map} when is_map(map) -> decode(map)
-      {:ok, _other} -> {:error, {:invalid_use_case_document, "top level must be an object"}}
+      {:ok, _other} -> {:error, {:invalid_prompt_document, "top level must be an object"}}
       {:error, reason} -> {:error, {:invalid_json, reason}}
     end
   end
@@ -112,8 +112,8 @@ defmodule PromptOnSDK.UseCaseDocument do
 
   def decode(map) when is_map(map) do
     with {:ok, version, warnings} <- schema_version(map),
-         {:ok, use_cases_raw} <- fetch_map(map, "use_cases") do
-      {use_cases, warnings} = decode_use_cases(use_cases_raw, warnings)
+         {:ok, prompts_raw} <- fetch_map(map, "prompts") do
+      {prompts, warnings} = decode_prompts(prompts_raw, warnings)
       {deployments, warnings} = decode_deployments(get(map, "deployments"), warnings)
 
       {prompt_versions, warnings} =
@@ -125,7 +125,7 @@ defmodule PromptOnSDK.UseCaseDocument do
         schema_version: version,
         project: to_str(get(map, "project")),
         environment: to_str(get(map, "environment")),
-        use_cases: attach_deployments(use_cases, deployments),
+        prompts: attach_deployments(prompts, deployments),
         deployments: deployments,
         prompt_versions: prompt_versions,
         models: models
@@ -135,15 +135,15 @@ defmodule PromptOnSDK.UseCaseDocument do
     end
   end
 
-  def decode(_), do: {:error, {:invalid_use_case_document, "use-case document must be a map"}}
+  def decode(_), do: {:error, {:invalid_prompt_document, "prompt document must be a map"}}
 
-  @doc "The Deployment for a use case key. `nil` when there is none."
+  @doc "The Deployment for a prompt key. `nil` when there is none."
   @spec deployment(t(), String.t() | atom()) :: deployment() | nil
-  def deployment(%__MODULE__{} = data, use_case_key) when is_atom(use_case_key),
-    do: deployment(data, Atom.to_string(use_case_key))
+  def deployment(%__MODULE__{} = data, prompt_key) when is_atom(prompt_key),
+    do: deployment(data, Atom.to_string(prompt_key))
 
-  def deployment(%__MODULE__{} = data, use_case_key),
-    do: Map.get(data.deployments, use_case_key)
+  def deployment(%__MODULE__{} = data, prompt_key),
+    do: Map.get(data.deployments, prompt_key)
 
   # ---------------------------------------------------------------------------
   # top level
@@ -156,12 +156,12 @@ defmodule PromptOnSDK.UseCaseDocument do
     do: {:error, {:unsupported_schema_version, v}}
 
   defp check_schema_version(nil),
-    do: {:error, {:invalid_use_case_document, "schema_version is required"}}
+    do: {:error, {:invalid_prompt_document, "schema_version is required"}}
 
   defp check_schema_version(other),
     do:
       {:error,
-       {:invalid_use_case_document,
+       {:invalid_prompt_document,
         "schema_version must be a positive integer, got: #{inspect(other)}"}}
 
   defp fetch_map(map, key) do
@@ -170,37 +170,37 @@ defmodule PromptOnSDK.UseCaseDocument do
         {:ok, v}
 
       nil ->
-        {:error, {:invalid_use_case_document, "#{key} is required"}}
+        {:error, {:invalid_prompt_document, "#{key} is required"}}
 
       other ->
-        {:error, {:invalid_use_case_document, "#{key} must be an object, got: #{inspect(other)}"}}
+        {:error, {:invalid_prompt_document, "#{key} must be an object, got: #{inspect(other)}"}}
     end
   end
 
   # ---------------------------------------------------------------------------
-  # use cases
+  # prompts
 
-  defp decode_use_cases(map, warnings) do
+  defp decode_prompts(map, warnings) do
     Enum.reduce(map, {%{}, warnings}, fn {key, raw}, {acc, warnings} ->
       key = to_str(key)
 
       case raw do
         raw when is_map(raw) ->
-          {use_case, warnings} = decode_use_case(key, raw, warnings)
-          {Map.put(acc, key, use_case), warnings}
+          {prompt, warnings} = decode_prompt(key, raw, warnings)
+          {Map.put(acc, key, prompt), warnings}
 
         other ->
-          {acc, [{:invalid_use_case, {key, other}} | warnings]}
+          {acc, [{:invalid_prompt, {key, other}} | warnings]}
       end
     end)
   end
 
-  defp decode_use_case(key, raw, warnings) do
+  defp decode_prompt(key, raw, warnings) do
     {kind, warnings} = to_enum(get(raw, "kind"), @kinds, :chat, :unknown_kind, warnings)
     {input_schema, warnings} = decode_input_schema(get(raw, "input_schema"), warnings)
     {payload_policy, warnings} = decode_payload_policy(get(raw, "payload_policy"), warnings)
 
-    use_case = %{
+    prompt = %{
       id: to_str(get(raw, "id")),
       key: key,
       kind: kind,
@@ -210,16 +210,16 @@ defmodule PromptOnSDK.UseCaseDocument do
       deployment: nil
     }
 
-    {use_case, warnings}
+    {prompt, warnings}
   end
 
-  # Attach the top-level deployments to the use case with the same key (so the app only has to
+  # Attach the top-level deployments to the prompt with the same key (so the app only has to
   # look in one place).
-  defp attach_deployments(use_cases, deployments) when map_size(deployments) == 0, do: use_cases
+  defp attach_deployments(prompts, deployments) when map_size(deployments) == 0, do: prompts
 
-  defp attach_deployments(use_cases, deployments) do
-    Map.new(use_cases, fn {key, use_case} ->
-      {key, %{use_case | deployment: Map.get(deployments, key)}}
+  defp attach_deployments(prompts, deployments) do
+    Map.new(prompts, fn {key, prompt} ->
+      {key, %{prompt | deployment: Map.get(deployments, key)}}
     end)
   end
 
@@ -286,38 +286,38 @@ defmodule PromptOnSDK.UseCaseDocument do
   defp decode_deployments(other, warnings), do: {%{}, [{:invalid_deployments, other} | warnings]}
 
   defp decode_deployment(key, raw, warnings) do
-    {pins, warnings} = decode_prompt_pins(get(raw, "prompt_pins"), key, warnings)
+    {pins, warnings} = decode_template_pins(get(raw, "template_pins"), key, warnings)
 
     {%{
        id: to_str(get(raw, "id")),
-       use_case_key: to_str(get(raw, "use_case_key")) || key,
+       prompt_key: to_str(get(raw, "prompt_key")) || key,
        revision: to_int(get(raw, "revision"), nil),
        model_id: to_str(get(raw, "model_id")),
        params: to_string_key_map(get(raw, "params")),
        provider_options: to_string_key_map(get(raw, "provider_options")),
-       prompt_pins: pins
+       template_pins: pins
      }, warnings}
   end
 
-  defp decode_prompt_pins(nil, _key, warnings), do: {%{}, warnings}
+  defp decode_template_pins(nil, _key, warnings), do: {%{}, warnings}
 
-  defp decode_prompt_pins(map, key, warnings) when is_map(map) do
+  defp decode_template_pins(map, key, warnings) when is_map(map) do
     Enum.reduce(map, {%{}, warnings}, fn {name, version_id}, {acc, warnings} ->
       case {to_str(name), to_str(version_id)} do
         {name, version_id} when is_binary(name) and is_binary(version_id) ->
           {Map.put(acc, name, version_id), warnings}
 
         _ ->
-          {acc, [{:invalid_prompt_pin, {key, name}} | warnings]}
+          {acc, [{:invalid_template_pin, {key, name}} | warnings]}
       end
     end)
   end
 
-  defp decode_prompt_pins(other, key, warnings),
-    do: {%{}, [{:invalid_prompt_pins, {key, other}} | warnings]}
+  defp decode_template_pins(other, key, warnings),
+    do: {%{}, [{:invalid_template_pins, {key, other}} | warnings]}
 
   # ---------------------------------------------------------------------------
-  # prompt versions / models
+  # template versions / models
 
   defp decode_by_id(nil, _fun, warnings), do: {%{}, warnings}
 
@@ -360,7 +360,7 @@ defmodule PromptOnSDK.UseCaseDocument do
 
     {%{
        id: to_str(get(raw, "id")),
-       prompt_id: to_str(get(raw, "prompt_id")),
+       prompt_template_id: to_str(get(raw, "prompt_template_id")),
        number: to_int(get(raw, "number"), nil),
        engine: engine,
        messages: messages,

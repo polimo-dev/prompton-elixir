@@ -13,7 +13,7 @@ defmodule PromptOnSDK.PayloadTest do
     Map.merge(
       %{
         "id" => "0191c000-0000-7000-8000-000000000001",
-        "use_case" => "diary_generation",
+        "prompt_key" => "diary_generation",
         "status" => "ok",
         "stop_kind" => "stop",
         "end_user_ref" => "u_1",
@@ -42,7 +42,7 @@ defmodule PromptOnSDK.PayloadTest do
       out = Payload.apply(gen(), %{mode: :none, sample_rate: 1.0, max_bytes: 1024}, @config)
       refute Map.has_key?(out, "input")
       refute Map.has_key?(out, "output")
-      assert out["use_case"] == "diary_generation"
+      assert out["prompt_key"] == "diary_generation"
     end
 
     test ":hash replaces input/output with the pre-hashed wrapper {sha256, bytes, hashed: true}" do
@@ -266,7 +266,7 @@ defmodule PromptOnSDK.PayloadTest do
         assert_within_server_limits(out, max)
         assert out["input"]["truncated"] == true
         assert out["output"]["truncated"] == true
-        # The first message (the system prompt slot) always keeps its role
+        # The first message (the system template slot) always keeps its role
         assert hd(out["input"]["messages"])["role"] == hd(msgs)["role"]
 
         # Drops happen only in the middle: the last message survives (usually), or the budget ran
@@ -382,7 +382,7 @@ defmodule PromptOnSDK.PayloadTest do
       redact = fn _ -> raise "boom" end
       out = Payload.apply(gen(), nil, %{@config | log: %{redact: redact}})
       refute Map.has_key?(out, "input")
-      assert out["use_case"] == "diary_generation"
+      assert out["prompt_key"] == "diary_generation"
     end
   end
 end

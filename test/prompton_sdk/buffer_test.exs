@@ -10,7 +10,7 @@ defmodule PromptOnSDK.BufferTest do
   defp gen(i),
     do: %{
       "id" => "gen-#{i}",
-      "use_case" => "diary_generation",
+      "prompt_key" => "diary_generation",
       "status" => "ok",
       "started_at" => "2026-08-18T00:00:00Z"
     }

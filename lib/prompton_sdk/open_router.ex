@@ -23,14 +23,14 @@ defmodule PromptOnSDK.OpenRouter do
   `PromptOnSDK.track/3`.
   """
 
-  alias PromptOnSDK.{Params, Resolution, UseCase}
+  alias PromptOnSDK.{Params, Prompt, Resolution}
 
   @doc """
   OpenRouter `POST /chat/completions` body.
   """
-  @spec request_body(UseCase.t(), [map()], map()) :: map()
-  def request_body(%UseCase{} = use_case, messages, overrides \\ %{}) when is_list(messages),
-    do: request_body_from_resolution(UseCase.to_resolution(use_case), messages, overrides)
+  @spec request_body(Prompt.t(), [map()], map()) :: map()
+  def request_body(%Prompt{} = prompt, messages, overrides \\ %{}) when is_list(messages),
+    do: request_body_from_resolution(Prompt.to_resolution(prompt), messages, overrides)
 
   defp request_body_from_resolution(%Resolution{} = r, messages, overrides)
        when is_list(messages) do

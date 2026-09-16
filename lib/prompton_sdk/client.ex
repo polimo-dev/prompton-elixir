@@ -7,7 +7,7 @@ defmodule PromptOnSDK.Client do
   Every callback takes a `PromptOnSDK.Config.t()` as its first argument (so implementations can be
   stateless). Return values:
 
-  * `fetch_use_cases/3`: `{:ok, %{status: 200, body: binary | map, etag, last_modified}}` |
+  * `fetch_prompts/3`: `{:ok, %{status: 200, body: binary | map, etag, last_modified}}` |
     `{:ok, %{status: 304}}` | `{:ok, %{status: other, body: term}}` | `{:error, term}`.
     `body` is the **raw bytes** (written to the disk cache as is); if a map is returned, the SDK
     re-serializes it. `opts[:receive_timeout]` is the timeout for this request only (the boot
@@ -19,7 +19,7 @@ defmodule PromptOnSDK.Client do
 
   alias PromptOnSDK.Config
 
-  @type use_case_document_response ::
+  @type prompt_document_response ::
           %{
             status: 200,
             body: binary() | map(),
@@ -35,8 +35,8 @@ defmodule PromptOnSDK.Client do
           headers: %{String.t() => String.t()}
         }
 
-  @callback fetch_use_cases(Config.t(), etag :: String.t() | nil, opts :: keyword()) ::
-              {:ok, use_case_document_response()} | {:error, term()}
+  @callback fetch_prompts(Config.t(), etag :: String.t() | nil, opts :: keyword()) ::
+              {:ok, prompt_document_response()} | {:error, term()}
   @callback post_logs(Config.t(), [map()]) :: {:ok, post_response()} | {:error, term()}
   @callback post_feedback(Config.t(), [map()]) :: {:ok, post_response()} | {:error, term()}
 end

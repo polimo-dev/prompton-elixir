@@ -5,7 +5,7 @@ defmodule PromptOnSDK.Client.Req do
   * Bearer auth (`api_key`), `Accept: application/json`, `retry: false` (the retry policy is owned
     by the loader/Buffer), timeout from `config.http[:receive_timeout]` (default 5 seconds). The
     remaining keys of `config.http` (including `plug:`) are passed to Req as they are.
-  * `GET /use-cases` appends `?environment=<slug>` (the `environment` setting, default
+  * `GET /prompts` appends `?environment=<slug>` (the `environment` setting, default
     `"production"`), sends `If-None-Match`, and does **not decode the body**
     (`decode_body: false`): the ETag is a hash of the body bytes, so the raw body is stored in the
     disk cache unchanged. Keys are per project, so this query is what selects the environment
@@ -19,12 +19,12 @@ defmodule PromptOnSDK.Client.Req do
   alias PromptOnSDK.Config
 
   @impl true
-  def fetch_use_cases(%{} = config, etag, opts \\ []) do
+  def fetch_prompts(%{} = config, etag, opts \\ []) do
     headers = if etag, do: [{"if-none-match", etag}], else: []
 
     req_opts =
       [
-        url: "/use-cases",
+        url: "/prompts",
         params: [environment: Map.get(config, :environment) || Config.default_environment()],
         headers: headers,
         decode_body: false

@@ -23,11 +23,6 @@
           "max_tokens": 512,
           "temperature": 0.2
         },
-        "prompt": "default",
-        "prompt_names": [
-          "default",
-          "ko"
-        ],
         "prompt_version": {
           "id": "0198f2a1-0000-7000-8000-00000000a001",
           "number": 2
@@ -42,11 +37,16 @@
         },
         "revision": 3,
         "source": "remote",
+        "template": "default",
+        "template_names": [
+          "default",
+          "ko"
+        ],
         "warnings": []
       },
-      "name": "chat/default_prompt_without_variables",
+      "name": "chat/default_template_without_variables",
       "note": "with no variables the raw message templates come back unrendered",
-      "use_case": "greeting"
+      "prompt_key": "greeting"
     },
     {
       "document_ref": "production",
@@ -71,11 +71,6 @@
           "max_tokens": 512,
           "temperature": 0.2
         },
-        "prompt": "default",
-        "prompt_names": [
-          "default",
-          "ko"
-        ],
         "prompt_version": {
           "id": "0198f2a1-0000-7000-8000-00000000a001",
           "number": 2
@@ -90,10 +85,15 @@
         },
         "revision": 3,
         "source": "remote",
+        "template": "default",
+        "template_names": [
+          "default",
+          "ko"
+        ],
         "warnings": []
       },
-      "name": "chat/default_prompt_rendered",
-      "use_case": "greeting",
+      "name": "chat/default_template_rendered",
+      "prompt_key": "greeting",
       "variables": {
         "name": "Ada"
       }
@@ -121,11 +121,6 @@
           "max_tokens": 512,
           "temperature": 0.2
         },
-        "prompt": "ko",
-        "prompt_names": [
-          "default",
-          "ko"
-        ],
         "prompt_version": {
           "id": "0198f2a1-0000-7000-8000-00000000a002",
           "number": 1
@@ -140,12 +135,17 @@
         },
         "revision": 3,
         "source": "remote",
+        "template": "ko",
+        "template_names": [
+          "default",
+          "ko"
+        ],
         "warnings": []
       },
       "name": "chat/named_prompt_rendered",
-      "note": "the prompt name is the only selection axis; this is how language branching works",
-      "prompt": "ko",
-      "use_case": "greeting",
+      "note": "the template name is the only selection axis; this is how language branching works",
+      "prompt_key": "greeting",
+      "template": "ko",
       "variables": {
         "name": "아다"
       }
@@ -173,11 +173,6 @@
           "max_tokens": 512,
           "temperature": 0.2
         },
-        "prompt": "default",
-        "prompt_names": [
-          "default",
-          "ko"
-        ],
         "prompt_version": {
           "id": "0198f2a1-0000-7000-8000-00000000a001",
           "number": 2
@@ -192,11 +187,16 @@
         },
         "revision": 3,
         "source": "remote",
+        "template": "default",
+        "template_names": [
+          "default",
+          "ko"
+        ],
         "warnings": []
       },
-      "name": "chat/explicit_default_prompt_name",
-      "prompt": "default",
-      "use_case": "greeting",
+      "name": "chat/explicit_default_template_name",
+      "prompt_key": "greeting",
+      "template": "default",
       "variables": {
         "name": "Ada"
       }
@@ -209,26 +209,26 @@
         "variable": "name"
       },
       "name": "chat/missing_variable",
-      "note": "use case selection succeeds; rendering fails",
-      "use_case": "greeting",
+      "note": "prompt selection succeeds; rendering fails",
+      "prompt_key": "greeting",
       "variables": {}
     },
     {
       "document_ref": "production",
       "environment": "production",
       "expect": {
-        "error": "unknown_prompt",
+        "error": "unknown_template",
         "key": "greeting",
-        "prompt": "fr",
-        "prompt_names": [
+        "template": "fr",
+        "template_names": [
           "default",
           "ko"
         ]
       },
       "name": "chat/unpinned_prompt_name",
       "note": "never falls back to \"default\"",
-      "prompt": "fr",
-      "use_case": "greeting"
+      "prompt_key": "greeting",
+      "template": "fr"
     },
     {
       "document_ref": "production",
@@ -242,10 +242,6 @@
         "params": {
           "temperature": 0.0
         },
-        "prompt": "default",
-        "prompt_names": [
-          "default"
-        ],
         "prompt_version": {
           "id": "0198f2a1-0000-7000-8000-00000000a003",
           "number": 4
@@ -259,11 +255,15 @@
         },
         "revision": 1,
         "source": "remote",
+        "template": "default",
+        "template_names": [
+          "default"
+        ],
         "text": "Summarize the following notes in one paragraph.\n- alpha\n- beta\n- gamma\n",
         "warnings": []
       },
       "name": "text/rendered_with_for_loop",
-      "use_case": "summarize",
+      "prompt_key": "summarize",
       "variables": {
         "items": [
           "alpha",
@@ -284,10 +284,6 @@
         "params": {
           "temperature": 0.0
         },
-        "prompt": "default",
-        "prompt_names": [
-          "default"
-        ],
         "prompt_version": {
           "id": "0198f2a1-0000-7000-8000-00000000a003",
           "number": 4
@@ -301,11 +297,15 @@
         },
         "revision": 1,
         "source": "remote",
+        "template": "default",
+        "template_names": [
+          "default"
+        ],
         "text": "Summarize the following notes in one paragraph.\n{% for item in items %}- {{ item }}\n{% endfor %}",
         "warnings": []
       },
       "name": "text/raw_template_without_variables",
-      "use_case": "summarize"
+      "prompt_key": "summarize"
     },
     {
       "document_ref": "production",
@@ -319,18 +319,18 @@
         "params": {
           "dimensions": 256
         },
-        "prompt": null,
-        "prompt_names": [],
         "prompt_version": null,
         "provider": "openrouter",
         "provider_options": {},
         "revision": 2,
         "source": "remote",
+        "template": null,
+        "template_names": [],
         "warnings": []
       },
       "name": "embedding/no_prompt",
-      "note": "kind embedding resolves the model only: prompt and prompt_version are null",
-      "use_case": "embed"
+      "note": "kind embedding resolves the model only: template and prompt_version are null",
+      "prompt_key": "embed"
     },
     {
       "document_ref": "production",
@@ -344,19 +344,19 @@
         "params": {
           "dimensions": 256
         },
-        "prompt": null,
-        "prompt_names": [],
         "prompt_version": null,
         "provider": "openrouter",
         "provider_options": {},
         "revision": 2,
         "source": "remote",
+        "template": null,
+        "template_names": [],
         "warnings": []
       },
       "name": "embedding/prompt_name_is_ignored",
-      "note": "a prompt name given for an embedding use case is ignored, not an error",
-      "prompt": "ko",
-      "use_case": "embed"
+      "note": "a template name given for an embedding prompt is ignored, not an error",
+      "prompt_key": "embed",
+      "template": "ko"
     },
     {
       "document_ref": "production",
@@ -364,18 +364,18 @@
       "expect": {
         "error": "unresolved"
       },
-      "name": "error/use_case_without_deployment",
-      "use_case": "draft"
+      "name": "error/prompt_without_deployment",
+      "prompt_key": "draft"
     },
     {
       "document_ref": "production",
       "environment": "production",
       "expect": {
-        "error": "unknown_use_case",
+        "error": "unknown_prompt",
         "key": "nope"
       },
-      "name": "error/unknown_use_case",
-      "use_case": "nope"
+      "name": "error/unknown_prompt",
+      "prompt_key": "nope"
     },
     {
       "document_ref": "staging",
@@ -401,10 +401,6 @@
           "temperature": 0.9,
           "top_p": 0.8
         },
-        "prompt": "default",
-        "prompt_names": [
-          "default"
-        ],
         "prompt_version": {
           "id": "0198f2a1-0000-7000-8000-00000000a004",
           "number": 3
@@ -418,11 +414,15 @@
         },
         "revision": 7,
         "source": "remote",
+        "template": "default",
+        "template_names": [
+          "default"
+        ],
         "warnings": []
       },
-      "name": "staging/same_use_case_different_pin",
-      "note": "same key, different environment: different model, params and prompt version",
-      "use_case": "greeting",
+      "name": "staging/same_prompt_different_pin",
+      "note": "same key, different environment: different model, params and template version",
+      "prompt_key": "greeting",
       "variables": {
         "name": "Ada"
       }
@@ -431,16 +431,16 @@
       "document_ref": "staging",
       "environment": "staging",
       "expect": {
-        "error": "unknown_prompt",
+        "error": "unknown_template",
         "key": "greeting",
-        "prompt": "ko",
-        "prompt_names": [
+        "template": "ko",
+        "template_names": [
           "default"
         ]
       },
       "name": "staging/prompt_pinned_only_in_production",
-      "prompt": "ko",
-      "use_case": "greeting"
+      "prompt_key": "greeting",
+      "template": "ko"
     },
     {
       "document_ref": "degraded",
@@ -454,10 +454,6 @@
         "params": {
           "temperature": 0.4
         },
-        "prompt": "default",
-        "prompt_names": [
-          "default"
-        ],
         "prompt_version": null,
         "provider": null,
         "provider_options": {
@@ -467,23 +463,27 @@
         },
         "revision": 1,
         "source": "remote",
+        "template": "default",
+        "template_names": [
+          "default"
+        ],
         "warnings": [
           "missing_prompt_version: 0198f2a1-0000-7000-8000-0000000000ff",
           "missing_model: 0198f2a1-0000-7000-8000-0000000000fe"
         ]
       },
       "name": "degraded/missing_prompt_version_and_model",
-      "note": "the document references ids it does not contain: use case selection still succeeds, with warnings and null fields",
-      "use_case": "greeting"
+      "note": "the document references ids it does not contain: prompt selection still succeeds, with warnings and null fields",
+      "prompt_key": "greeting"
     }
   ],
-  "conformance": "use_case",
-  "default_prompt": "default",
-  "description": "Use case selection: use-case document + use case (+ prompt name) -> which model, params and prompt version to use, then filling when `variables` is present. This is exactly what POST /api/v1/use-cases/{key}/prompt does on the server.",
+  "conformance": "prompt",
+  "default_template": "default",
+  "description": "Prompt selection: prompt document + prompt (+ template name) -> which model, params and template version to use, then filling when `variables` is present. This is exactly what POST /api/v1/prompts/{key}/render does on the server.",
   "document_notes": {
-    "degraded": "Synthetic. The deployment points at a prompt version id and a model id the document does not contain, to pin down the warning path. A healthy server never emits this.",
-    "production": "The everyday shape: three deployed use cases (chat with two prompt names, text, embedding) plus one use case that has never been deployed. Field for field what GET /use-cases returns.",
-    "staging": "The same project in another environment: one use case, a different revision, different params and only the default prompt pinned."
+    "degraded": "Synthetic. The deployment points at a template version id and a model id the document does not contain, to pin down the warning path. A healthy server never emits this.",
+    "production": "The everyday shape: three deployed prompts (chat with two template names, text, embedding) plus one prompt that has never been deployed. Field for field what GET /prompts returns.",
+    "staging": "The same project in another environment: one prompt, a different revision, different params and only the default template pinned."
   },
   "documents": {
     "degraded": {
@@ -492,23 +492,22 @@
           "id": "0198f2a1-0000-7000-8000-00000000d021",
           "model_id": "0198f2a1-0000-7000-8000-0000000000fe",
           "params": {},
-          "prompt_pins": {
-            "default": "0198f2a1-0000-7000-8000-0000000000ff"
-          },
           "provider_options": {
             "only": [
               "OpenAI"
             ]
           },
-          "revision": 1
+          "revision": 1,
+          "template_pins": {
+            "default": "0198f2a1-0000-7000-8000-0000000000ff"
+          }
         }
       },
       "environment": "production",
       "models": {},
       "project": "sdkfixture",
       "prompt_versions": {},
-      "schema_version": 4,
-      "use_cases": {
+      "prompts": {
         "greeting": {
           "default_params": {
             "temperature": 0.4
@@ -524,7 +523,8 @@
             "sample_rate": 1.0
           }
         }
-      }
+      },
+      "schema_version": 5
     },
     "production": {
       "deployments": {
@@ -534,9 +534,9 @@
           "params": {
             "dimensions": 256
           },
-          "prompt_pins": {},
           "provider_options": {},
-          "revision": 2
+          "revision": 2,
+          "template_pins": {}
         },
         "greeting": {
           "id": "0198f2a1-0000-7000-8000-00000000d001",
@@ -544,25 +544,25 @@
           "params": {
             "temperature": 0.2
           },
-          "prompt_pins": {
-            "default": "0198f2a1-0000-7000-8000-00000000a001",
-            "ko": "0198f2a1-0000-7000-8000-00000000a002"
-          },
           "provider_options": {
             "allow_fallbacks": true,
             "sort": null
           },
-          "revision": 3
+          "revision": 3,
+          "template_pins": {
+            "default": "0198f2a1-0000-7000-8000-00000000a001",
+            "ko": "0198f2a1-0000-7000-8000-00000000a002"
+          }
         },
         "summarize": {
           "id": "0198f2a1-0000-7000-8000-00000000d002",
           "model_id": "0198f2a1-0000-7000-8000-00000000e001",
           "params": {},
-          "prompt_pins": {
-            "default": "0198f2a1-0000-7000-8000-00000000a003"
-          },
           "provider_options": {},
-          "revision": 1
+          "revision": 1,
+          "template_pins": {
+            "default": "0198f2a1-0000-7000-8000-00000000a003"
+          }
         }
       },
       "environment": "production",
@@ -612,7 +612,7 @@
             }
           ],
           "number": 2,
-          "prompt_id": "0198f2a1-0000-7000-8000-00000000b001",
+          "prompt_template_id": "0198f2a1-0000-7000-8000-00000000b001",
           "text_template": null
         },
         "0198f2a1-0000-7000-8000-00000000a002": {
@@ -629,7 +629,7 @@
             }
           ],
           "number": 1,
-          "prompt_id": "0198f2a1-0000-7000-8000-00000000b001",
+          "prompt_template_id": "0198f2a1-0000-7000-8000-00000000b001",
           "text_template": null
         },
         "0198f2a1-0000-7000-8000-00000000a003": {
@@ -637,12 +637,11 @@
           "id": "0198f2a1-0000-7000-8000-00000000a003",
           "messages": [],
           "number": 4,
-          "prompt_id": "0198f2a1-0000-7000-8000-00000000b002",
+          "prompt_template_id": "0198f2a1-0000-7000-8000-00000000b002",
           "text_template": "Summarize the following notes in one paragraph.\n{% for item in items %}- {{ item }}\n{% endfor %}"
         }
       },
-      "schema_version": 4,
-      "use_cases": {
+      "prompts": {
         "draft": {
           "default_params": {},
           "id": "0198f2a1-0000-7000-8000-00000000c004",
@@ -718,7 +717,8 @@
             "sample_rate": 1.0
           }
         }
-      }
+      },
+      "schema_version": 5
     },
     "staging": {
       "deployments": {
@@ -729,11 +729,11 @@
             "temperature": 0.9,
             "top_p": 0.8
           },
-          "prompt_pins": {
-            "default": "0198f2a1-0000-7000-8000-00000000a004"
-          },
           "provider_options": {},
-          "revision": 7
+          "revision": 7,
+          "template_pins": {
+            "default": "0198f2a1-0000-7000-8000-00000000a004"
+          }
         }
       },
       "environment": "staging",
@@ -773,12 +773,11 @@
             }
           ],
           "number": 3,
-          "prompt_id": "0198f2a1-0000-7000-8000-00000000b001",
+          "prompt_template_id": "0198f2a1-0000-7000-8000-00000000b001",
           "text_template": null
         }
       },
-      "schema_version": 4,
-      "use_cases": {
+      "prompts": {
         "greeting": {
           "default_params": {
             "max_tokens": 512,
@@ -801,18 +800,19 @@
             "sample_rate": 0.5
           }
         }
-      }
+      },
+      "schema_version": 5
     }
   },
   "error_categories": {
-    "missing_variable": "use case selection succeeded but rendering needed a variable that was absent",
-    "unknown_prompt": "the deployment pins no prompt version under that name (no fallback to \"default\")",
-    "unknown_use_case": "the document has no use case with that key",
-    "unresolved": "the use case exists but has no deployment in this environment"
+    "missing_variable": "prompt selection succeeded but rendering needed a variable that was absent",
+    "unknown_prompt": "the document has no prompt with that key",
+    "unknown_template": "the deployment pins no template version under that name (no fallback to \"default\")",
+    "unresolved": "the prompt exists but has no deployment in this environment"
   },
   "format_version": 1,
   "generated_from": {
-    "commit": "14d4817832d8a906a461ad708f3245796f6be4b1",
+    "commit": "d478eb1e462f9516d568e8f0b0de2f86215e73b2",
     "language": "elixir",
     "repo": "https://github.com/polimo-dev/prompton-elixir",
     "sdk": "prompton_sdk",
@@ -820,7 +820,7 @@
   },
   "merge_semantics": {
     "null_values": "an override value of null is kept as null, not deleted",
-    "params": "use_case.default_params <- deployment.params (shallow, later wins)",
+    "params": "prompt.default_params <- deployment.params (shallow, later wins)",
     "provider_options": "model.provider_options <- deployment.provider_options (shallow, later wins)"
   }
 }

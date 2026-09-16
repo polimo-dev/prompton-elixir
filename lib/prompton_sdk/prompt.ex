@@ -1,8 +1,8 @@
-defmodule PromptOnSDK.UseCase do
+defmodule PromptOnSDK.Prompt do
   @moduledoc """
-  A deployed PromptOn use case ready for an application call.
+  A deployed PromptOn prompt ready for an application call.
 
-  Fetch one with `PromptOnSDK.use_case/2`, render it with `messages/2` or `text/2`, then wrap the
+  Fetch one with `PromptOnSDK.prompt/2`, render it with `messages/2` or `text/2`, then wrap the
   provider call with `track/3`.
   """
 
@@ -25,8 +25,8 @@ defmodule PromptOnSDK.UseCase do
           params: map(),
           provider_options: map(),
           deployment: %{id: String.t() | nil, revision: non_neg_integer() | nil},
-          prompt: String.t() | nil,
-          prompt_names: [String.t()],
+          template: String.t() | nil,
+          template_names: [String.t()],
           prompt_version: %{id: String.t() | nil, number: non_neg_integer() | nil} | nil,
           engine: :liquid | :raw | nil,
           messages: [message()] | nil,
@@ -46,8 +46,8 @@ defmodule PromptOnSDK.UseCase do
             params: %{},
             provider_options: %{},
             deployment: %{id: nil, revision: nil},
-            prompt: nil,
-            prompt_names: [],
+            template: nil,
+            template_names: [],
             prompt_version: nil,
             engine: nil,
             messages: nil,
@@ -60,9 +60,9 @@ defmodule PromptOnSDK.UseCase do
 
   @doc false
   @spec from_resolution(Resolution.t(), [String.t()]) :: t()
-  def from_resolution(%Resolution{} = r, prompt_names \\ []) do
+  def from_resolution(%Resolution{} = r, template_names \\ []) do
     %__MODULE__{
-      key: r.use_case_key,
+      key: r.prompt_key,
       kind: r.kind,
       model: r.model,
       model_id: r.model_id,
@@ -70,8 +70,8 @@ defmodule PromptOnSDK.UseCase do
       params: r.params,
       provider_options: r.provider_options,
       deployment: %{id: r.deployment_id, revision: r.deployment_revision},
-      prompt: r.prompt,
-      prompt_names: prompt_names,
+      template: r.template,
+      template_names: template_names,
       prompt_version:
         r.prompt_version_id &&
           %{id: r.prompt_version_id, number: r.prompt_version_number},
@@ -86,76 +86,76 @@ defmodule PromptOnSDK.UseCase do
     }
   end
 
-  @doc "Render a chat use case into provider messages."
+  @doc "Render a chat prompt into provider messages."
   @spec messages(t(), map() | nil, keyword()) ::
           {:ok, [map()]} | {:error, :wrong_kind | :no_template | Template.render_error()}
-  def messages(use_case, variables, opts \\ [])
+  def messages(prompt, variables, opts \\ [])
 
-  def messages(%__MODULE__{} = use_case, variables, opts) do
-    case select_prompt(use_case, opts) do
-      {:ok, use_case} ->
+  def messages(%__MODULE__{} = prompt, variables, opts) do
+    case select_prompt(prompt, opts) do
+      {:ok, prompt} ->
         result =
-          case use_case do
+          case prompt do
             %{kind: :chat} ->
-              Template.render_messages(use_case.messages || [], variables,
-                engine: use_case.engine || :liquid
+              Template.render_messages(prompt.messages || [], variables,
+                engine: prompt.engine || :liquid
               )
 
             _other ->
               {:error, :wrong_kind}
           end
 
-        remember_prompt_selection(use_case, opts, result)
+        remember_prompt_selection(prompt, opts, result)
         result
 
       error ->
-        clear_prompt_selection(use_case)
+        clear_prompt_selection(prompt)
         error
     end
   end
 
-  @doc "Render a text use case into a single provider input string."
+  @doc "Render a text prompt into a single provider input string."
   @spec text(t(), map() | nil, keyword()) ::
           {:ok, String.t()} | {:error, :wrong_kind | :no_template | Template.render_error()}
-  def text(use_case, variables, opts \\ [])
+  def text(prompt, variables, opts \\ [])
 
-  def text(%__MODULE__{} = use_case, variables, opts) do
-    case select_prompt(use_case, opts) do
-      {:ok, use_case} ->
+  def text(%__MODULE__{} = prompt, variables, opts) do
+    case select_prompt(prompt, opts) do
+      {:ok, prompt} ->
         result =
-          case use_case do
+          case prompt do
             %{kind: :text, text_template: text} when is_binary(text) ->
-              Template.render(text, variables, engine: use_case.engine || :liquid)
+              Template.render(text, variables, engine: prompt.engine || :liquid)
 
             _other ->
               {:error, :wrong_kind}
           end
 
-        remember_prompt_selection(use_case, opts, result)
+        remember_prompt_selection(prompt, opts, result)
         result
 
       error ->
-        clear_prompt_selection(use_case)
+        clear_prompt_selection(prompt)
         error
     end
   end
 
   @doc "Wrap a provider call and enqueue one monitoring log."
   @spec track(t(), keyword() | map(), (-> term())) :: term()
-  def track(%__MODULE__{} = use_case, meta \\ [], fun) when is_function(fun, 0) do
-    prompt =
+  def track(%__MODULE__{} = prompt, meta \\ [], fun) when is_function(fun, 0) do
+    template =
       case prompt_opt(meta) do
         nil ->
-          pop_prompt_selection(use_case)
+          pop_prompt_selection(prompt)
 
         explicit_prompt ->
-          clear_prompt_selection(use_case)
+          clear_prompt_selection(prompt)
           explicit_prompt
       end
 
-    case select_prompt(use_case, prompt: prompt) do
-      {:ok, use_case} ->
-        Generation.with_generation(to_resolution(use_case), drop_prompt(meta), fun)
+    case select_prompt(prompt, template: template) do
+      {:ok, prompt} ->
+        Generation.with_generation(to_resolution(prompt), drop_prompt(meta), fun)
 
       {:error, reason} ->
         {:error, reason}
@@ -164,70 +164,70 @@ defmodule PromptOnSDK.UseCase do
 
   @doc false
   @spec to_resolution(t()) :: Resolution.t()
-  def to_resolution(%__MODULE__{} = use_case) do
+  def to_resolution(%__MODULE__{} = prompt) do
     %Resolution{
-      use_case_key: use_case.key,
-      kind: use_case.kind,
-      prompt: use_case.prompt,
-      deployment_id: use_case.deployment.id,
-      deployment_revision: use_case.deployment.revision,
-      prompt_version_id: use_case.prompt_version && use_case.prompt_version.id,
-      prompt_version_number: use_case.prompt_version && use_case.prompt_version.number,
-      engine: use_case.engine,
-      model_id: use_case.model_id,
-      model: use_case.model,
-      provider: use_case.provider,
-      params: use_case.params,
-      provider_options: use_case.provider_options,
-      messages: use_case.messages,
-      text_template: use_case.text_template,
-      input_schema: use_case.input_schema,
-      source: use_case.source,
-      etag: use_case.etag,
-      payload_policy: use_case.payload_policy,
-      warnings: use_case.warnings
+      prompt_key: prompt.key,
+      kind: prompt.kind,
+      template: prompt.template,
+      deployment_id: prompt.deployment.id,
+      deployment_revision: prompt.deployment.revision,
+      prompt_version_id: prompt.prompt_version && prompt.prompt_version.id,
+      prompt_version_number: prompt.prompt_version && prompt.prompt_version.number,
+      engine: prompt.engine,
+      model_id: prompt.model_id,
+      model: prompt.model,
+      provider: prompt.provider,
+      params: prompt.params,
+      provider_options: prompt.provider_options,
+      messages: prompt.messages,
+      text_template: prompt.text_template,
+      input_schema: prompt.input_schema,
+      source: prompt.source,
+      etag: prompt.etag,
+      payload_policy: prompt.payload_policy,
+      warnings: prompt.warnings
     }
   end
 
-  defp select_prompt(use_case, opts) do
+  defp select_prompt(prompt, opts) do
     case prompt_opt(opts) do
       nil ->
-        {:ok, use_case}
+        {:ok, prompt}
 
-      prompt when prompt == use_case.prompt ->
-        {:ok, use_case}
+      template when template == prompt.template ->
+        {:ok, prompt}
 
-      prompt ->
-        PromptOnSDK.use_case(use_case.key, prompt: prompt)
+      template ->
+        PromptOnSDK.prompt(prompt.key, template: template)
     end
   end
 
-  defp remember_prompt_selection(use_case, opts, result) do
+  defp remember_prompt_selection(prompt, opts, result) do
     case {prompt_opt(opts), result} do
       {nil, _} ->
-        clear_prompt_selection(use_case)
+        clear_prompt_selection(prompt)
 
       {_prompt, {:ok, _rendered}} ->
-        put_prompt_selection(use_case)
+        put_prompt_selection(prompt)
 
       {_prompt, _error} ->
-        clear_prompt_selection(use_case)
+        clear_prompt_selection(prompt)
     end
   end
 
-  defp put_prompt_selection(%__MODULE__{} = use_case) do
+  defp put_prompt_selection(%__MODULE__{} = prompt) do
     selections =
       Process.get(@selection_key, %{})
-      |> Map.put(use_case.key, use_case.prompt)
+      |> Map.put(prompt.key, prompt.template)
 
     Process.put(@selection_key, selections)
     :ok
   end
 
-  defp clear_prompt_selection(%__MODULE__{} = use_case) do
+  defp clear_prompt_selection(%__MODULE__{} = prompt) do
     selections =
       Process.get(@selection_key, %{})
-      |> Map.delete(use_case.key)
+      |> Map.delete(prompt.key)
 
     if map_size(selections) == 0 do
       Process.delete(@selection_key)
@@ -238,9 +238,9 @@ defmodule PromptOnSDK.UseCase do
     :ok
   end
 
-  defp pop_prompt_selection(%__MODULE__{} = use_case) do
+  defp pop_prompt_selection(%__MODULE__{} = prompt) do
     selections = Process.get(@selection_key, %{})
-    {prompt, selections} = Map.pop(selections, use_case.key)
+    {prompt, selections} = Map.pop(selections, prompt.key)
 
     if map_size(selections) == 0 do
       Process.delete(@selection_key)
@@ -251,11 +251,11 @@ defmodule PromptOnSDK.UseCase do
     prompt
   end
 
-  defp prompt_opt(opts) when is_list(opts), do: Keyword.get(opts, :prompt)
-  defp prompt_opt(opts) when is_map(opts), do: opts[:prompt] || opts["prompt"]
+  defp prompt_opt(opts) when is_list(opts), do: Keyword.get(opts, :template)
+  defp prompt_opt(opts) when is_map(opts), do: opts[:template] || opts["template"]
   defp prompt_opt(_opts), do: nil
 
-  defp drop_prompt(opts) when is_list(opts), do: Keyword.drop(opts, [:prompt, "prompt"])
-  defp drop_prompt(opts) when is_map(opts), do: Map.drop(opts, [:prompt, "prompt"])
+  defp drop_prompt(opts) when is_list(opts), do: Keyword.drop(opts, [:template, "template"])
+  defp drop_prompt(opts) when is_map(opts), do: Map.drop(opts, [:template, "template"])
   defp drop_prompt(opts), do: opts
 end
