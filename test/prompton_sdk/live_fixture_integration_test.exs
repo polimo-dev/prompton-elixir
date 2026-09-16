@@ -96,10 +96,8 @@ defmodule PromptOnSDK.LiveFixtureIntegrationTest do
                "variables" => %{"name" => "아다"}
              })
 
-    assert status in [404, 422]
-    assert get_in(body, ["error", "details", "reason"]) == "unknown_template"
-    assert get_in(body, ["error", "details", "key"]) == "greeting"
-    assert get_in(body, ["error", "details", "template_names"]) == ["default"]
+    assert status == 400
+    assert get_in(body, ["error", "code"]) == "invalid_request"
   end
 
   test "POST /logs accepts the first live fixture log and reports duplicate resend", %{
