@@ -738,11 +738,11 @@
   "description": "Monitoring-log payload policy applied by the SDK before a record is enqueued. Run apply(log, policy, config) and compare with expect.log.",
   "format_version": 1,
   "generated_from": {
-    "commit": "d478eb1e462f9516d568e8f0b0de2f86215e73b2",
+    "commit": "ce3ac589af254b2f0705257c8a813e3bba40c007",
     "language": "elixir",
     "repo": "https://github.com/polimo-dev/prompton-elixir",
     "sdk": "prompton_sdk",
-    "sdk_version": "0.2.0"
+    "sdk_version": "0.3.0"
   },
   "limits": {
     "error_message": "2048 bytes, fixed",

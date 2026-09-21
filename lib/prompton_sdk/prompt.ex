@@ -6,7 +6,7 @@ defmodule PromptOnSDK.Prompt do
   provider call with `track/3`.
   """
 
-  alias PromptOnSDK.{Generation, Resolution, Template}
+  alias PromptOnSDK.{Generation, ProviderRequest, Resolution, Template}
 
   @selection_key {__MODULE__, :selected_prompts}
 
@@ -18,10 +18,13 @@ defmodule PromptOnSDK.Prompt do
 
   @type t :: %__MODULE__{
           key: String.t(),
-          kind: :chat | :text | :embedding,
+          kind: :chat | :decision | :text | :embedding,
           model: String.t() | nil,
           model_id: String.t() | nil,
           provider: atom() | nil,
+          api: :chat_completions | :decisions | nil,
+          request_path: String.t() | nil,
+          decision: map() | nil,
           params: map(),
           provider_options: map(),
           deployment: %{id: String.t() | nil, revision: non_neg_integer() | nil},
@@ -43,6 +46,9 @@ defmodule PromptOnSDK.Prompt do
             model: nil,
             model_id: nil,
             provider: nil,
+            api: nil,
+            request_path: nil,
+            decision: nil,
             params: %{},
             provider_options: %{},
             deployment: %{id: nil, revision: nil},
@@ -67,6 +73,9 @@ defmodule PromptOnSDK.Prompt do
       model: r.model,
       model_id: r.model_id,
       provider: r.provider,
+      api: r.api,
+      request_path: r.request_path,
+      decision: r.decision,
       params: r.params,
       provider_options: r.provider_options,
       deployment: %{id: r.deployment_id, revision: r.deployment_revision},
@@ -84,6 +93,27 @@ defmodule PromptOnSDK.Prompt do
       warnings: r.warnings,
       etag: r.etag
     }
+  end
+
+  @doc "Prepare a provider POST request without making a provider call. Supports template selection and request overrides."
+  @spec request(t(), map() | nil, keyword()) :: {:ok, ProviderRequest.t()} | {:error, term()}
+  def request(%__MODULE__{} = prompt, variables, opts \\ []) do
+    case select_prompt(prompt, opts) do
+      {:ok, selected} ->
+        result =
+          ProviderRequest.build(
+            to_resolution(selected),
+            variables,
+            Keyword.delete(opts, :template)
+          )
+
+        remember_prompt_selection(selected, opts, result)
+        result
+
+      error ->
+        clear_prompt_selection(prompt)
+        error
+    end
   end
 
   @doc "Render a chat prompt into provider messages."
@@ -177,6 +207,9 @@ defmodule PromptOnSDK.Prompt do
       model_id: prompt.model_id,
       model: prompt.model,
       provider: prompt.provider,
+      api: prompt.api,
+      request_path: prompt.request_path,
+      decision: prompt.decision,
       params: prompt.params,
       provider_options: prompt.provider_options,
       messages: prompt.messages,

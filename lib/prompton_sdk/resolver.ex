@@ -68,9 +68,11 @@ defmodule PromptOnSDK.Resolver do
 
     {model, warnings} = lookup(snapshot.models, deployment.model_id, :missing_model, warnings)
 
+    kind = serving_kind(snapshot, prompt, prompt_version)
+
     %Resolution{
       prompt_key: prompt.key,
-      kind: prompt.kind,
+      kind: kind,
       template: prompt_name,
       deployment_id: deployment.id,
       deployment_revision: deployment.revision,
@@ -80,11 +82,14 @@ defmodule PromptOnSDK.Resolver do
       model_id: model && model.id,
       model: model && model.model_id,
       provider: model && model.provider,
+      api: Map.get(deployment, :api),
+      request_path: Map.get(deployment, :request_path),
+      decision: prompt_version && Map.get(prompt_version, :decision),
       params: Params.merge(prompt.default_params, deployment.params),
       provider_options:
         Params.merge(model && model.provider_options, deployment.provider_options),
-      messages: template_messages(prompt.kind, prompt_version),
-      text_template: template_text(prompt.kind, prompt_version),
+      messages: template_messages(kind, prompt_version),
+      text_template: template_text(kind, prompt_version),
       input_schema: prompt.input_schema,
       source: Keyword.get(opts, :source, :remote),
       etag: Keyword.get(opts, :etag),
@@ -92,6 +97,11 @@ defmodule PromptOnSDK.Resolver do
       warnings: warnings
     }
   end
+
+  defp serving_kind(_snapshot, _prompt, %{kind: kind}) when not is_nil(kind), do: kind
+  defp serving_kind(%{schema_version: 5}, prompt, _version), do: prompt.kind
+  defp serving_kind(_snapshot, %{kind: :embedding}, _version), do: :embedding
+  defp serving_kind(_snapshot, _prompt, _version), do: nil
 
   defp template_messages(:chat, %{messages: messages}) when is_list(messages), do: messages
   defp template_messages(_, _), do: nil

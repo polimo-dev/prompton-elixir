@@ -67,7 +67,7 @@ defmodule PromptOnSDK.ConformanceTest do
   test "prompt.json: every prompt document decodes as schema v5" do
     for {ref, raw} <- load("prompt.json")["documents"] do
       assert {:ok, data, _warnings} = PromptDocument.decode(raw), "document #{ref}"
-      assert data.schema_version == PromptDocument.schema_version()
+      assert data.schema_version == raw["schema_version"]
     end
   end
 

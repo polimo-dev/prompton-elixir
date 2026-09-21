@@ -1,7 +1,7 @@
 defmodule PromptOnSDK.MixProject do
   use Mix.Project
 
-  @version "0.2.0"
+  @version "0.3.0"
   @source_url "https://github.com/polimo-dev/prompton-elixir"
 
   def project do
@@ -14,7 +14,7 @@ defmodule PromptOnSDK.MixProject do
       deps: deps(),
       name: "PromptOnSDK",
       description:
-        "PromptOn Elixir SDK — fetch deployed prompts, render messages/text, and log provider calls.",
+        "PromptOn Elixir SDK — fetch deployed prompts, prepare provider requests, and log calls.",
       package: package(),
       source_url: @source_url,
       docs: [main: "readme", extras: ["README.md", "CHANGELOG.md"]]

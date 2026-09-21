@@ -31,7 +31,7 @@ defmodule PromptOnSDK.Result do
             raw: nil,
             result: nil
 
-  alias PromptOnSDK.StopKind
+  alias PromptOnSDK.{Decisions, StopKind}
 
   @atom_keys ~w(
     choices completion_tokens content cost cost_details cost_source finish_reason input_tokens
@@ -69,6 +69,76 @@ defmodule PromptOnSDK.Result do
       raw: body
     }
   end
+
+  @doc """
+  Normalize a Decisions response, preserving every typed answer and probability in `result`,
+  `content` (JSON), and `raw`. The tagged result can be returned directly from `track/3`.
+  """
+  @spec from_decisions(map()) :: {:ok, t()} | {:error, :invalid_decisions_response}
+  def from_decisions(body) when is_map(body) and not is_struct(body) do
+    normalized = Decisions.normalize(body)
+    answers = normalized["answers"]
+    usage = normalized["usage"]
+
+    if valid_decisions_response?(normalized, answers, usage) do
+      is_byok = usage["is_byok"] == true
+      cost = effective_cost(usage, is_byok)
+
+      {:ok,
+       %__MODULE__{
+         content: Jason.encode!(answers),
+         result: answers,
+         finish_reason: "stop",
+         stop_kind: :stop,
+         tool_calls: [],
+         usage: %{
+           input_tokens: usage["input_tokens"],
+           output_tokens: usage["output_tokens"],
+           raw: usage
+         },
+         cost_usd: cost,
+         cost_source: if(is_nil(cost), do: :unknown, else: :provider),
+         is_byok: is_byok,
+         model_used: normalized["model"],
+         upstream_provider: normalized["provider"],
+         raw: body
+       }}
+    else
+      {:error, :invalid_decisions_response}
+    end
+  end
+
+  def from_decisions(_), do: {:error, :invalid_decisions_response}
+
+  defp valid_decisions_response?(body, answers, usage) do
+    Decisions.json?(body) and is_map(answers) and map_size(answers) > 0 and
+      Enum.all?(answers, fn {_name, answer} -> valid_decision_answer?(answer) end) and
+      valid_decision_usage?(usage) and
+      is_binary(body["model"]) and body["model"] != ""
+  end
+
+  defp valid_decision_usage?(usage) when is_map(usage),
+    do: Enum.all?(["input_tokens", "output_tokens"], &(is_integer(usage[&1]) and usage[&1] >= 0))
+
+  defp valid_decision_usage?(_), do: false
+
+  defp valid_decision_answer?(answer) when is_map(answer) do
+    value_valid =
+      case answer["type"] do
+        "choice" -> is_binary(answer["choice"])
+        type when type in ["score", "noul"] -> is_number(answer[type])
+        _ -> false
+      end
+
+    probabilities = answer["probabilities"]
+
+    value_valid and (is_nil(answer["confidence"]) or is_number(answer["confidence"])) and
+      (is_nil(probabilities) or
+         (is_map(probabilities) and
+            Enum.all?(probabilities, fn {_key, value} -> is_number(value) end)))
+  end
+
+  defp valid_decision_answer?(_), do: false
 
   @doc "Normalize an Anthropic Messages response."
   @spec from_anthropic(map()) :: t()

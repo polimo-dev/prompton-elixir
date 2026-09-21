@@ -74,6 +74,7 @@ defmodule PromptOnSDK do
     Config,
     Payload,
     Prompt,
+    Resolution,
     Resolver,
     Snapshot,
     Template,
@@ -124,6 +125,21 @@ defmodule PromptOnSDK do
       {:ok, Prompt.from_resolution(r, template_names)}
     end
   end
+
+  @doc """
+  Prepare the deployed provider request. Returns its explicit API, POST method, origin-relative
+  path, and rendered JSON body. The application supplies provider credentials and sends it.
+  Schema v5 snapshots remain readable but return `{:error, :missing_request_metadata}` here.
+  `opts` supports `template:`, `params:`, and `provider_options:` overrides. Decisions also accept
+  `session_id:`, `trace:`, and `user:` metadata. Protected body fields cannot be overridden.
+  """
+  @spec request(Prompt.t() | Resolution.t(), map() | nil, keyword()) ::
+          {:ok, PromptOnSDK.ProviderRequest.t()} | {:error, term()}
+  def request(prompt, variables, opts \\ [])
+  def request(%Prompt{} = prompt, variables, opts), do: Prompt.request(prompt, variables, opts)
+
+  def request(%Resolution{} = resolution, variables, opts),
+    do: resolution |> Prompt.from_resolution() |> Prompt.request(variables, opts)
 
   @doc "Render a chat prompt into provider messages."
   @spec messages(Prompt.t(), map() | nil, keyword()) ::

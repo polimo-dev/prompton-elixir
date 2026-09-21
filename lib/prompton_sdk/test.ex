@@ -146,9 +146,20 @@ defmodule PromptOnSDK.Test do
   defp stub_prompt_version(:text, pv_id, spec) do
     %{
       "id" => pv_id,
+      "kind" => "text",
       "number" => 1,
       "engine" => to_string(Map.get(spec, :engine, :liquid)),
       "text_template" => Map.get(spec, :text_template) || ""
+    }
+  end
+
+  defp stub_prompt_version(:decision, pv_id, spec) do
+    %{
+      "id" => pv_id,
+      "kind" => "decision",
+      "number" => 1,
+      "engine" => to_string(Map.get(spec, :engine, :liquid)),
+      "decision" => Map.get(spec, :decision)
     }
   end
 
@@ -156,6 +167,7 @@ defmodule PromptOnSDK.Test do
     %{
       "id" => pv_id,
       "number" => 1,
+      "kind" => "chat",
       "engine" => to_string(Map.get(spec, :engine, :liquid)),
       "messages" => Map.get(spec, :messages) || []
     }
@@ -176,6 +188,8 @@ defmodule PromptOnSDK.Test do
       "id" => "stub-deployment-#{key}",
       "revision" => 1,
       "model_id" => ids.model,
+      "api" => Map.get(spec, :api),
+      "request_path" => Map.get(spec, :request_path),
       "params" => Map.get(spec, :params, %{}),
       "provider_options" => Map.get(spec, :provider_options, %{}),
       "template_pins" => pins

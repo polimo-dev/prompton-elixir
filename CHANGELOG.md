@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0
+
+- Add `PromptOnSDK.request/3` for explicit deployed API/path and a rendered provider body without provider HTTP.
+- Read schema v6 native Decision templates and immutable serving kinds; continue reading legacy schema v5 for existing render APIs.
+- Validate native questions, provider routes and typed Decision metadata, including per-call request overrides.
+- Preserve prepared-request metadata in cached/bundled documents and test stubs.
+- Add `Result.from_decisions/1` and `input_decision` monitoring payloads that retain complete typed answers.
+
 ## 0.2.0
 
 - Rename the public runtime vocabulary from resolve/render/generation to prompt/message/log.

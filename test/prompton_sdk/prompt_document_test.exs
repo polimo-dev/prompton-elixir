@@ -96,9 +96,9 @@ defmodule PromptOnSDK.PromptDocumentTest do
     end
 
     test "a newer version is refused" do
-      map = Map.put(Fixtures.snapshot(), "schema_version", 6)
+      map = Map.put(Fixtures.snapshot(), "schema_version", 7)
 
-      assert {:error, {:unsupported_schema_version, 6}} = PromptDocument.decode(map)
+      assert {:error, {:unsupported_schema_version, 7}} = PromptDocument.decode(map)
     end
 
     test "schema_version is required even when `deployments` is present" do

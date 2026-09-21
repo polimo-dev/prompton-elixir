@@ -2,7 +2,7 @@ defmodule PromptOnSDK.PromptDocument do
   @moduledoc """
   Decodes the `GET /prompts` response into the SDK's prompt document structure.
 
-  The SDK reads **schema v5 only**. A document contains deployed prompts, their deployments,
+  The SDK reads **schema v6 and legacy v5**. Prepared requests require v6 metadata. A document contains deployed prompts, their deployments,
   pinned template versions, and model records. The decoded value is consumed by
   `PromptOnSDK.prompt/2` and by test helpers.
 
@@ -10,23 +10,25 @@ defmodule PromptOnSDK.PromptDocument do
   expected to be JSON/string-keyed maps.
   """
 
-  @schema_version 5
-  @kinds ~w(chat text embedding)
+  @schema_version 6
+  @kinds ~w(chat decision text embedding)
+  @apis ~w(chat_completions decisions)
   @engines ~w(liquid raw)
   @payload_modes ~w(full hash none)
   @variable_types ~w(string number boolean list map)
   @providers ~w(openrouter groq openai anthropic google other)
   @model_statuses ~w(active deprecated)
   @known_values @kinds ++
+                  @apis ++
                   @engines ++ @payload_modes ++ @variable_types ++ @providers ++ @model_statuses
   @known_value_atom_lookup Map.new(@known_values, &{&1, String.to_atom(&1)})
 
   @atom_keys ~w(
-    capabilities content context_length default_params deployments description display_name encrypt
+    api capabilities content context_length decision default_params deployments description display_name encrypt
     encrypt? engine environment example id input_schema kind max_bytes messages metadata mode
-    model_id models name number payload_policy pricing project prompt_template_id template_pins
+    model_id models name number params payload_policy pricing project prompt_template_id template_pins
     prompt_versions provider provider_options required required? retention_days revision role
-    sample_rate schema_version status text_template prompts
+    request_path sample_rate schema_version status text_template prompts
   )
   @atom_key_lookup Map.new(@atom_keys, &{&1, String.to_atom(&1)})
 
@@ -37,6 +39,8 @@ defmodule PromptOnSDK.PromptDocument do
           prompt_key: String.t(),
           revision: integer() | nil,
           model_id: String.t() | nil,
+          api: :chat_completions | :decisions | nil,
+          request_path: String.t() | nil,
           params: map(),
           provider_options: map(),
           template_pins: %{String.t() => String.t()}
@@ -57,6 +61,8 @@ defmodule PromptOnSDK.PromptDocument do
           prompt_template_id: String.t() | nil,
           number: integer() | nil,
           engine: :liquid | :raw,
+          kind: atom() | nil,
+          decision: map() | nil,
           messages: [PromptOnSDK.Prompt.message()] | nil,
           text_template: String.t() | nil
         }
@@ -114,10 +120,14 @@ defmodule PromptOnSDK.PromptDocument do
     with {:ok, version, warnings} <- schema_version(map),
          {:ok, prompts_raw} <- fetch_map(map, "prompts") do
       {prompts, warnings} = decode_prompts(prompts_raw, warnings)
-      {deployments, warnings} = decode_deployments(get(map, "deployments"), warnings)
+      {deployments, warnings} = decode_deployments(get(map, "deployments"), version, warnings)
 
       {prompt_versions, warnings} =
-        decode_by_id(get(map, "prompt_versions"), &decode_prompt_version/2, warnings)
+        decode_by_id(
+          get(map, "prompt_versions"),
+          &decode_prompt_version(&1, version, &2),
+          warnings
+        )
 
       {models, warnings} = decode_by_id(get(map, "models"), &decode_model/2, warnings)
 
@@ -150,7 +160,8 @@ defmodule PromptOnSDK.PromptDocument do
 
   defp schema_version(map), do: check_schema_version(get(map, "schema_version"))
 
-  defp check_schema_version(@schema_version), do: {:ok, @schema_version, []}
+  defp check_schema_version(version) when version in [5, @schema_version],
+    do: {:ok, version, []}
 
   defp check_schema_version(v) when is_integer(v) and v > 0,
     do: {:error, {:unsupported_schema_version, v}}
@@ -266,15 +277,15 @@ defmodule PromptOnSDK.PromptDocument do
   # ---------------------------------------------------------------------------
   # deployments (v3: pins)
 
-  defp decode_deployments(nil, warnings), do: {%{}, warnings}
+  defp decode_deployments(nil, _version, warnings), do: {%{}, warnings}
 
-  defp decode_deployments(map, warnings) when is_map(map) do
+  defp decode_deployments(map, version, warnings) when is_map(map) do
     Enum.reduce(map, {%{}, warnings}, fn {key, raw}, {acc, warnings} ->
       key = to_str(key)
 
       case raw do
         raw when is_map(raw) ->
-          {deployment, warnings} = decode_deployment(key, raw, warnings)
+          {deployment, warnings} = decode_deployment(key, raw, version, warnings)
           {Map.put(acc, key, deployment), warnings}
 
         other ->
@@ -283,16 +294,24 @@ defmodule PromptOnSDK.PromptDocument do
     end)
   end
 
-  defp decode_deployments(other, warnings), do: {%{}, [{:invalid_deployments, other} | warnings]}
+  defp decode_deployments(other, _version, warnings),
+    do: {%{}, [{:invalid_deployments, other} | warnings]}
 
-  defp decode_deployment(key, raw, warnings) do
+  defp decode_deployment(key, raw, version, warnings) do
     {pins, warnings} = decode_template_pins(get(raw, "template_pins"), key, warnings)
+
+    {api, warnings} =
+      to_enum(if(version == 6, do: get(raw, "api")), @apis, nil, :unknown_api, warnings)
+
+    request_path = if version == 6, do: get(raw, "request_path")
 
     {%{
        id: to_str(get(raw, "id")),
        prompt_key: to_str(get(raw, "prompt_key")) || key,
        revision: to_int(get(raw, "revision"), nil),
        model_id: to_str(get(raw, "model_id")),
+       api: api,
+       request_path: if(is_binary(request_path), do: request_path),
        params: to_string_key_map(get(raw, "params")),
        provider_options: to_string_key_map(get(raw, "provider_options")),
        template_pins: pins
@@ -354,7 +373,16 @@ defmodule PromptOnSDK.PromptDocument do
     if is_nil(get(raw, "id")), do: Map.put(raw, "id", id), else: raw
   end
 
-  defp decode_prompt_version(raw, warnings) do
+  defp decode_prompt_version(raw, version, warnings) do
+    {kind, warnings} =
+      to_enum(
+        if(version == 6, do: get(raw, "kind")),
+        @kinds,
+        nil,
+        :unknown_version_kind,
+        warnings
+      )
+
     {engine, warnings} = to_enum(get(raw, "engine"), @engines, :liquid, :unknown_engine, warnings)
     {messages, warnings} = decode_messages(get(raw, "messages"), warnings)
 
@@ -363,6 +391,8 @@ defmodule PromptOnSDK.PromptDocument do
        prompt_template_id: to_str(get(raw, "prompt_template_id")),
        number: to_int(get(raw, "number"), nil),
        engine: engine,
+       kind: kind,
+       decision: if(version == 6, do: PromptOnSDK.Decisions.normalize(get(raw, "decision"))),
        messages: messages,
        text_template: to_str(get(raw, "text_template"))
      }, warnings}

@@ -11,7 +11,7 @@ defmodule PromptOnSDK.Resolution do
 
   @type t :: %__MODULE__{
           prompt_key: String.t(),
-          kind: :chat | :text | :embedding,
+          kind: :chat | :decision | :text | :embedding,
           template: String.t() | nil,
           deployment_id: String.t() | nil,
           deployment_revision: non_neg_integer() | nil,
@@ -21,6 +21,9 @@ defmodule PromptOnSDK.Resolution do
           model_id: String.t() | nil,
           model: String.t() | nil,
           provider: atom() | nil,
+          api: :chat_completions | :decisions | nil,
+          request_path: String.t() | nil,
+          decision: map() | nil,
           params: map(),
           provider_options: map(),
           messages: [message()] | nil,
@@ -43,6 +46,9 @@ defmodule PromptOnSDK.Resolution do
             model_id: nil,
             model: nil,
             provider: nil,
+            api: nil,
+            request_path: nil,
+            decision: nil,
             params: %{},
             provider_options: %{},
             messages: nil,

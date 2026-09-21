@@ -154,6 +154,10 @@ defmodule PromptOnSDK.Generation do
       %{}
       |> maybe_put("variables", meta[:variables] && Params.stringify_keys(meta[:variables]))
       |> maybe_put("messages", meta[:input_messages])
+      |> maybe_put(
+        "decision",
+        meta[:input_decision] && PromptOnSDK.Decisions.normalize(meta[:input_decision])
+      )
 
     if map_size(input) == 0, do: nil, else: input
   end
@@ -253,6 +257,7 @@ defmodule PromptOnSDK.Generation do
       :trace_id,
       :sequence,
       :input_messages,
+      :input_decision,
       :variables,
       :metadata,
       :context,

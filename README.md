@@ -1,12 +1,12 @@
 # PromptOnSDK
 
-PromptOn Elixir SDK — fetch the deployed prompt, fill its messages/text,
+PromptOn Elixir SDK — fetch the deployed prompt and prepare its provider request,
 call the LLM **yourself**, and record a monitoring log. Thin by design (§7.1): PromptOn never sits in the
 request path, so an outage costs you nothing but fresher config.
 
 ```
 prompt(key) ──▶ %Prompt{key, kind, model, params, deployment, template, …}
-messages(prompt, vars) or text(prompt, vars) ─▶ provider input
+request(prompt, vars) ─▶ %{api, method: :post, path, body}
 track(prompt, meta, fn -> call the provider end) ─▶ log recorded asynchronously
 ```
 
@@ -24,9 +24,55 @@ Once published, the hex line will be:
 
 ```elixir
 def deps do
-  [{:prompton_sdk, "~> 0.2"}]
+  [{:prompton_sdk, "~> 0.3"}]
 end
 ```
+
+## Prepared provider requests
+
+SDK 0.3 reads schema v6 documents and returns the deployed API, origin-relative path and rendered
+body. Your app supplies the provider origin and credentials and sends the HTTP request:
+
+```elixir
+{:ok, prompt} = PromptOnSDK.prompt("support_route")
+{:ok, request} = PromptOnSDK.request(prompt, %{input: "My payment failed"})
+{:ok, response} = Req.request(
+  method: request.method,
+  url: provider_origin <> request.path,
+  auth: {:bearer, provider_key},
+  json: request.body
+)
+```
+
+`request.api` is `:chat_completions` or `:decisions`, taken from the deployment metadata rather than
+inferred from its model name. The pinned version determines the serving type even after the editor's
+type changes. Chat requests render `messages`; Decision requests render native `state` and `questions`
+recursively in string values, preserving JSON types, question names and choice labels.
+
+Supported explicit routes are OpenRouter Chat and Decisions, OpenAI Chat, and Groq Chat. Unsupported
+providers, missing metadata, API/type mismatches and invalid native questions return an error before
+a provider call. Legacy schema v5 documents remain readable by `messages/3` and `text/3`, but cannot
+prepare a request. Upgrade the server and cached/bundled document to schema v6 when adopting `request/3`.
+
+Options include `template:`, shallow `params:` and `provider_options:` overrides. Chat omits nil
+parameter values; provider options preserve explicit nil as JSON null. Decisions accept only
+`session_id`, `trace` and `user` parameters (also available as keyword options); session/user values
+must be strings up to 256 characters and trace must be an object. Sampling, tools, streaming and
+protected fields such as model/state/questions cannot be injected through Decision params.
+
+For Decisions monitoring, preserve the full answers and native input:
+
+```elixir
+PromptOnSDK.track(prompt, %{input_decision: Map.take(request.body, ["state", "questions"])}, fn ->
+  with {:ok, response} <- Req.request(method: request.method,
+         url: provider_origin <> request.path, auth: {:bearer, provider_key}, json: request.body) do
+    PromptOnSDK.Result.from_decisions(response.body)
+  end
+end)
+```
+
+`Result.from_decisions/1` returns `{:ok, result}` or `{:error, :invalid_decisions_response}` and keeps
+the full typed answers, probabilities, usage and raw response. Chat adapters remain available.
 
 ## Configuration
 
@@ -156,7 +202,7 @@ streaming), `PromptOnSDK.feedback/1` (`%{log_id, kind, value, …}`),
 
 ## Prompt document v5 — a deployment is a pin, not a router
 
-The SDK reads **schema v5 only**. A deployment revision no longer routes: no rules, no conditions, no targets,
+The SDK reads **schema v6 and legacy v5**; prepared requests require v6 metadata. A deployment revision no longer routes: no rules, no conditions, no targets,
 no weights, no A/B, no context dimensions. One revision is **one model** plus **one pinned template version per
 template name**:
 
