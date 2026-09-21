@@ -328,9 +328,8 @@ Licensed under the Apache License, Version 2.0 (the "License"); you may not use 
 compliance with the License. You may obtain a copy of the License at
 http://www.apache.org/licenses/LICENSE-2.0 — see [LICENSE](LICENSE) in this directory.
 
-This SDK (`sdk/elixir`) is licensed **separately** from the rest of the
-[polimo-dev/prompton](https://github.com/polimo-dev/prompton) repository, which is under the
-Functional Source License (FSL-1.1-ALv2). Apps depending on `prompton_sdk` take only Apache-2.0 code.
+This SDK is open source under Apache-2.0. PromptOn is available as a hosted service;
+the server source is private. Apps depending on `prompton_sdk` take only Apache-2.0 code.
 
 PromptOn is a trademark of Polimo. The license does not grant permission to use the PromptOn name or
 logo; forks and derived services must use a different name.
