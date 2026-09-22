@@ -11,10 +11,10 @@ defmodule PromptOnSDK.ProviderRequest do
         }
 
   @paths %{
-    {:openrouter, :chat_completions} => "/api/v1/chat/completions",
-    {:openrouter, :decisions} => "/api/alpha/decisions",
-    {:openai, :chat_completions} => "/v1/chat/completions",
-    {:groq, :chat_completions} => "/openai/v1/chat/completions"
+    {:openrouter, :chat_completions} => ["/api/v1/chat/completions"],
+    {:openrouter, :decisions} => ["/api/v1/systemone", "/api/alpha/decisions"],
+    {:openai, :chat_completions} => ["/v1/chat/completions"],
+    {:groq, :chat_completions} => ["/openai/v1/chat/completions"]
   }
   @protected ~w(model messages state questions provider usage api request_path method path body)
   @decision_params ~w(session_id trace user)
@@ -95,7 +95,7 @@ defmodule PromptOnSDK.ProviderRequest do
       not Map.has_key?(@paths, {resolution.provider, resolution.api}) ->
         {:error, :unsupported_provider_api}
 
-      @paths[{resolution.provider, resolution.api}] != resolution.request_path ->
+      resolution.request_path not in @paths[{resolution.provider, resolution.api}] ->
         {:error, :invalid_request_path}
 
       not is_binary(resolution.model) or String.trim(resolution.model) == "" ->

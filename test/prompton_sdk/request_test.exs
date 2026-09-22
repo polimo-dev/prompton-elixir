@@ -37,8 +37,7 @@ defmodule PromptOnSDK.RequestTest do
       model: "typesafe/jev-1.13",
       provider: :openrouter,
       api: if(kind == :chat, do: :chat_completions, else: :decisions),
-      request_path:
-        if(kind == :chat, do: "/api/v1/chat/completions", else: "/api/alpha/decisions"),
+      request_path: if(kind == :chat, do: "/api/v1/chat/completions", else: "/api/v1/systemone"),
       engine: :liquid,
       messages: [%{role: "user", content: "{{ input }}"}],
       decision: if(kind == :decision, do: decision())
@@ -57,7 +56,7 @@ defmodule PromptOnSDK.RequestTest do
           "revision" => 2,
           "api" => if(kind == "chat", do: "chat_completions", else: "decisions"),
           "request_path" =>
-            if(kind == "chat", do: "/api/v1/chat/completions", else: "/api/alpha/decisions"),
+            if(kind == "chat", do: "/api/v1/chat/completions", else: "/api/v1/systemone"),
           "template_pins" => %{"default" => "v"}
         }
       },
@@ -180,7 +179,7 @@ defmodule PromptOnSDK.RequestTest do
   test "Decision renders string values directly, preserving nested JSON, names, labels and types" do
     input = "quote \" and newline\n\\slash {{ untouched }}"
 
-    assert {:ok, %{api: :decisions, path: "/api/alpha/decisions", body: body}} =
+    assert {:ok, %{api: :decisions, path: "/api/v1/systemone", body: body}} =
              PromptOnSDK.request(resolution(:decision), %{input: input, team: "Support"})
 
     assert body["state"]["message"] == input
@@ -258,11 +257,24 @@ defmodule PromptOnSDK.RequestTest do
           "https://evil.test/v1/chat/completions",
           "//evil.test/path",
           "/v1/chat/completions",
+          "/v1/systemone",
+          "/api/systemone",
           "",
           123
         ] do
       assert {:error, :invalid_request_path} =
                PromptOnSDK.request(%{resolution() | request_path: path}, %{})
+    end
+
+    for path <- [
+          "https://evil.test/api/v1/systemone",
+          "//evil.test/api/v1/systemone",
+          "/v1/systemone",
+          "/api/systemone",
+          "/api/v1/chat/completions"
+        ] do
+      assert {:error, :invalid_request_path} =
+               PromptOnSDK.request(%{resolution(:decision) | request_path: path}, %{})
     end
 
     assert {:error, :unsupported_provider_api} =
@@ -367,6 +379,16 @@ defmodule PromptOnSDK.RequestTest do
     assert {:ok, _} = PromptOnSDK.request(r, %{input: "hello", team: "Support"})
   end
 
+  test "legacy OpenRouter Decisions path remains accepted for pinned snapshots" do
+    r = %{resolution(:decision) | request_path: "/api/alpha/decisions"}
+
+    assert {:ok, %{api: :decisions, path: "/api/alpha/decisions", body: body}} =
+             PromptOnSDK.request(r, %{input: "hello", team: "Support"})
+
+    assert body["model"] == "typesafe/jev-1.13"
+    assert body["state"]["message"] == "hello"
+  end
+
   test "pinned Chat version keeps Chat API even after current authoring kind becomes Decision" do
     doc = put_in(document("chat"), ["prompts", "route", "kind"], "decision")
     assert {:ok, decoded, []} = PromptDocument.decode(doc)
@@ -421,7 +443,7 @@ defmodule PromptOnSDK.RequestTest do
       kind: :decision,
       model: "typesafe/jev-1.13",
       api: :decisions,
-      request_path: "/api/alpha/decisions",
+      request_path: "/api/v1/systemone",
       decision: decision()
     }
 

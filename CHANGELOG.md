@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1
+
+- Use OpenRouter's System One route `/api/v1/systemone` for new Decision prepared requests.
+- Continue accepting legacy pinned OpenRouter Decision deployments that use `/api/alpha/decisions`.
+
 ## 0.3.0
 
 - Add `PromptOnSDK.request/3` for explicit deployed API/path and a rendered provider body without provider HTTP.

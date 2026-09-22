@@ -15,6 +15,45 @@ defmodule PromptOnSDK.SnapshotTest do
     Fixtures.snapshot() |> Map.merge(overrides) |> Jason.encode!()
   end
 
+  defp decision_snapshot_json(request_path \\ "/api/v1/systemone") do
+    Jason.encode!(%{
+      "schema_version" => 6,
+      "environment" => "production",
+      "prompts" => %{"route" => %{"id" => "p", "kind" => "decision"}},
+      "deployments" => %{
+        "route" => %{
+          "id" => "d",
+          "model_id" => "m",
+          "revision" => 2,
+          "api" => "decisions",
+          "request_path" => request_path,
+          "template_pins" => %{"default" => "v"}
+        }
+      },
+      "prompt_versions" => %{
+        "v" => %{
+          "id" => "v",
+          "kind" => "decision",
+          "number" => 3,
+          "engine" => "liquid",
+          "decision" => %{
+            "state" => %{"message" => "{{ input }}"},
+            "questions" => %{
+              "route" => %{
+                "type" => "choice",
+                "instructions" => "Route {{ team }}",
+                "criteria" => %{"support" => nil}
+              }
+            }
+          }
+        }
+      },
+      "models" => %{
+        "m" => %{"id" => "m", "provider" => "openrouter", "model_id" => "typesafe/jev-1.13"}
+      }
+    })
+  end
+
   describe "boot" do
     test "no snapshot anywhere → not_ready, and boot is not blocked by a slow fetch" do
       test_pid = self()
@@ -159,6 +198,26 @@ defmodule PromptOnSDK.SnapshotTest do
 
       info = PromptOnSDK.prompt_document_info()
       assert info.source == :remote and info.stale? == false and info.etag == ~s("e2")
+    end
+
+    test "remote v6 Decision snapshots prepare System One requests" do
+      body = decision_snapshot_json()
+      attach_telemetry([@updated])
+
+      FakeClient.set(:fetch_prompts, fn nil, _opts ->
+        ok_200(body, ~s("decision-v6"))
+      end)
+
+      start_sdk()
+      assert_receive {:telemetry, @updated, %{}, %{etag: ~s("decision-v6"), source: :remote}}, 500
+
+      assert {:ok, prompt} = PromptOnSDK.prompt("route")
+
+      assert {:ok, %{api: :decisions, path: "/api/v1/systemone", body: request_body}} =
+               PromptOnSDK.request(prompt, %{input: "hello", team: "Support"})
+
+      assert request_body["state"] == %{"message" => "hello"}
+      assert get_in(request_body, ["questions", "route", "instructions"]) == "Route Support"
     end
 
     test "polling sends If-None-Match; 304 leaves snapshot unchanged" do

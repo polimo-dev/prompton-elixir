@@ -49,10 +49,13 @@ inferred from its model name. The pinned version determines the serving type eve
 type changes. Chat requests render `messages`; Decision requests render native `state` and `questions`
 recursively in string values, preserving JSON types, question names and choice labels.
 
-Supported explicit routes are OpenRouter Chat and Decisions, OpenAI Chat, and Groq Chat. Unsupported
-providers, missing metadata, API/type mismatches and invalid native questions return an error before
-a provider call. Legacy schema v5 documents remain readable by `messages/3` and `text/3`, but cannot
-prepare a request. Upgrade the server and cached/bundled document to schema v6 when adopting `request/3`.
+Supported explicit routes are OpenRouter Chat (`/api/v1/chat/completions`) and System One Decisions
+(`/api/v1/systemone`), OpenAI Chat (`/v1/chat/completions`), and Groq Chat
+(`/openai/v1/chat/completions`). Existing OpenRouter Decision deployments pinned to the legacy
+`/api/alpha/decisions` route still prepare successfully. Unsupported providers, missing metadata,
+API/type mismatches and invalid native questions return an error before a provider call. Legacy schema
+v5 documents remain readable by `messages/3` and `text/3`, but cannot prepare a request. Upgrade the
+server and cached/bundled document to schema v6 when adopting `request/3`.
 
 Options include `template:`, shallow `params:` and `provider_options:` overrides. Chat omits nil
 parameter values; provider options preserve explicit nil as JSON null. Decisions accept only
