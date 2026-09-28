@@ -10,8 +10,8 @@ defmodule PromptOnSDK.Client.Req do
     (`decode_body: false`): the ETag is a hash of the body bytes, so the raw body is stored in the
     disk cache unchanged. Keys are per project, so this query is what selects the environment
     (2026-09-01).
-  * `POST /logs` and `POST /feedback` send `{"logs": [...]}` /
-    `{"feedback": [...]}` JSON.
+  * `POST /logs?environment=<slug>` sends generation logs as `{"logs": [...]}` and trace
+    events as `{"logs": [], "events": [...]}`. `POST /feedback` sends `{"feedback": [...]}` JSON.
   """
 
   @behaviour PromptOnSDK.Client
@@ -53,13 +53,23 @@ defmodule PromptOnSDK.Client.Req do
   end
 
   @impl true
-  def post_logs(config, items), do: post(config, "/logs", %{"logs" => items})
+  def post_logs(config, items), do: post_logs_envelope(config, %{"logs" => items})
 
   @impl true
   def post_feedback(config, items), do: post(config, "/feedback", %{"feedback" => items})
 
-  defp post(config, path, body) do
-    case Req.post(base(config), url: path, json: body) do
+  @impl true
+  def post_events(config, items),
+    do: post_logs_envelope(config, %{"logs" => [], "events" => items})
+
+  defp post_logs_envelope(config, body) do
+    post(config, "/logs", body,
+      params: [environment: Map.get(config, :environment) || Config.default_environment()]
+    )
+  end
+
+  defp post(config, path, body, opts \\ []) do
+    case Req.post(base(config), Keyword.merge([url: path, json: body], opts)) do
       {:ok, %Req.Response{status: status, body: body, headers: headers}} ->
         {:ok, %{status: status, body: body, headers: flatten_headers(headers)}}
 

@@ -290,21 +290,25 @@ defmodule GenConformance do
   @uc_summarize "0198f2a1-0000-7000-8000-00000000c002"
   @uc_embed "0198f2a1-0000-7000-8000-00000000c003"
   @uc_draft "0198f2a1-0000-7000-8000-00000000c004"
+  @uc_tool_chat "0198f2a1-0000-7000-8000-00000000c005"
   @dep_greeting_prod "0198f2a1-0000-7000-8000-00000000d001"
   @dep_summarize_prod "0198f2a1-0000-7000-8000-00000000d002"
   @dep_embed_prod "0198f2a1-0000-7000-8000-00000000d003"
+  @dep_tool_chat_prod "0198f2a1-0000-7000-8000-00000000d004"
   @dep_greeting_stg "0198f2a1-0000-7000-8000-00000000d011"
   @dep_broken "0198f2a1-0000-7000-8000-00000000d021"
   @pv_greeting_default "0198f2a1-0000-7000-8000-00000000a001"
   @pv_greeting_ko "0198f2a1-0000-7000-8000-00000000a002"
   @pv_summarize "0198f2a1-0000-7000-8000-00000000a003"
   @pv_greeting_stg "0198f2a1-0000-7000-8000-00000000a004"
+  @pv_tool_chat "0198f2a1-0000-7000-8000-00000000a005"
   @pv_absent "0198f2a1-0000-7000-8000-0000000000ff"
   @model_chat "0198f2a1-0000-7000-8000-00000000e001"
   @model_embed "0198f2a1-0000-7000-8000-00000000e002"
   @model_absent "0198f2a1-0000-7000-8000-0000000000fe"
   @prompt_greeting "0198f2a1-0000-7000-8000-00000000b001"
   @prompt_summarize "0198f2a1-0000-7000-8000-00000000b002"
+  @prompt_tool_chat "0198f2a1-0000-7000-8000-00000000b003"
 
   defp prompt_cases do
     documents = %{
@@ -355,6 +359,14 @@ defmodule GenConformance do
           prompt: "greeting",
           variables: %{},
           note: "prompt selection succeeds; rendering fails"
+        },
+        %{
+          name: "chat/native_tool_messages_preserved",
+          ref: "production",
+          prompt: "tool_chat",
+          variables: %{"input" => "continue"},
+          note:
+            "native chat message fields survive rendering: null content, tool_calls, tool_call_id and array content are not stripped"
         },
         %{
           name: "chat/unpinned_prompt_name",
@@ -544,10 +556,9 @@ defmodule GenConformance do
   defp fill_prompt(_r, _variables), do: {:ok, %{}}
 
   defp message_map(message) do
-    %{
-      "role" => message[:role] || message["role"],
-      "content" => message[:content] || message["content"]
-    }
+    message
+    |> PromptOnSDK.Decisions.normalize()
+    |> Map.reject(fn {_key, value} -> is_nil(value) end)
   end
 
   defp payload_policy(mode, sample_rate) do
@@ -593,6 +604,13 @@ defmodule GenConformance do
           "input_schema" => [],
           "default_params" => %{},
           "payload_policy" => payload_policy("full", 1.0)
+        },
+        "tool_chat" => %{
+          "id" => @uc_tool_chat,
+          "kind" => "chat",
+          "input_schema" => [%{"name" => "input", "type" => "string", "required" => true}],
+          "default_params" => %{},
+          "payload_policy" => payload_policy("full", 1.0)
         }
       },
       "deployments" => %{
@@ -619,6 +637,14 @@ defmodule GenConformance do
           "params" => %{"dimensions" => 256},
           "provider_options" => %{},
           "template_pins" => %{}
+        },
+        "tool_chat" => %{
+          "id" => @dep_tool_chat_prod,
+          "revision" => 1,
+          "model_id" => @model_chat,
+          "params" => %{},
+          "provider_options" => %{},
+          "template_pins" => %{"default" => @pv_tool_chat}
         }
       },
       "prompt_versions" => %{
@@ -652,6 +678,33 @@ defmodule GenConformance do
           "messages" => [],
           "text_template" =>
             "Summarize the following notes in one paragraph.\n{% for item in items %}- {{ item }}\n{% endfor %}"
+        },
+        @pv_tool_chat => %{
+          "id" => @pv_tool_chat,
+          "prompt_template_id" => @prompt_tool_chat,
+          "number" => 1,
+          "engine" => "liquid",
+          "messages" => [
+            %{"role" => "system", "content" => "Continue with {{ input }}."},
+            %{
+              "role" => "assistant",
+              "content" => nil,
+              "tool_calls" => [
+                %{
+                  "id" => "call_search",
+                  "type" => "function",
+                  "function" => %{"name" => "search", "arguments" => "{\"q\":\"diary\"}"}
+                }
+              ]
+            },
+            %{
+              "role" => "tool",
+              "tool_call_id" => "call_search",
+              "content" => [%{"type" => "text", "text" => "found"}]
+            },
+            %{"role" => "user", "content" => "Next: {{ input }}"}
+          ],
+          "text_template" => nil
         }
       },
       "models" => %{

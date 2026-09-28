@@ -27,8 +27,10 @@ defmodule PromptOnSDK.ProviderRequest do
          :ok <- validate_variables(variables),
          {:ok, params} <- request_params(resolution),
          {:ok, options} <- provider_options(resolution),
+         {:ok, tool_fields} <- provider_tool_fields(resolution.tools),
+         {:ok, params} <- reject_tool_param_conflicts(params, tool_fields),
          {:ok, body} <- render_body(resolution, variables) do
-      body = body |> Map.merge(params) |> put_provider(options)
+      body = body |> Map.merge(params) |> Map.merge(tool_fields) |> put_provider(options)
 
       body =
         if resolution.provider == :openrouter and resolution.api == :chat_completions,
@@ -167,10 +169,14 @@ defmodule PromptOnSDK.ProviderRequest do
   defp render_body(%{api: :chat_completions} = resolution, variables) do
     messages = Decisions.normalize(resolution.messages)
 
-    if is_list(messages) and messages != [] and Enum.all?(messages, &valid_message?/1) do
+    if is_list(messages) and messages != [] do
       with {:ok, rendered} <-
-             Template.render_messages(messages, variables, engine: resolution.engine) do
+             Template.render_messages(messages, variables, engine: resolution.engine),
+           true <- rendered != [] and Enum.all?(rendered, &valid_message?/1) do
         {:ok, %{"model" => resolution.model, "messages" => rendered}}
+      else
+        false -> {:error, :invalid_messages}
+        error -> error
       end
     else
       {:error, :invalid_messages}
@@ -183,9 +189,109 @@ defmodule PromptOnSDK.ProviderRequest do
     end
   end
 
-  defp valid_message?(%{"role" => role, "content" => content} = message),
+  defp provider_tool_fields(nil), do: {:ok, %{}}
+
+  defp provider_tool_fields(tools) do
+    tools = Decisions.normalize(tools)
+
+    cond do
+      not is_map(tools) ->
+        {:error, :invalid_tools}
+
+      not Decisions.json?(tools) ->
+        {:error, :invalid_tools}
+
+      not is_list(tools["definitions"]) ->
+        {:error, :invalid_tools}
+
+      Map.keys(tools) -- ~w(definitions tool_choice parallel_tool_calls) != [] ->
+        {:error, :invalid_tools}
+
+      true ->
+        with :ok <- validate_tool_definitions(tools["definitions"]),
+             :ok <- validate_tool_policy(tools) do
+          fields =
+            %{"tools" => Enum.map(tools["definitions"], &strip_tool_metadata/1)}
+            |> maybe_put("tool_choice", tools["tool_choice"])
+            |> maybe_put("parallel_tool_calls", tools["parallel_tool_calls"])
+
+          {:ok, fields}
+        end
+    end
+  end
+
+  defp validate_tool_definitions(definitions) do
+    if Enum.all?(definitions, &valid_tool_definition?/1),
+      do: :ok,
+      else: {:error, :invalid_tools}
+  end
+
+  defp valid_tool_definition?(%{"type" => "function", "function" => function} = tool)
+       when is_map(function) do
+    Map.keys(tool) -- ~w(type function output_schema output_examples) == [] and
+      valid_function_tool?(function) and
+      valid_output_schema?(tool["output_schema"]) and
+      valid_output_examples?(tool["output_examples"])
+  end
+
+  defp valid_tool_definition?(_), do: false
+
+  defp valid_function_tool?(function) do
+    is_binary(function["name"]) and String.trim(function["name"]) != "" and
+      (is_nil(function["description"]) or is_binary(function["description"])) and
+      (is_nil(function["parameters"]) or is_map(function["parameters"]))
+  end
+
+  defp valid_output_schema?(nil), do: true
+  defp valid_output_schema?(schema), do: is_map(schema)
+
+  defp valid_output_examples?(nil), do: true
+  defp valid_output_examples?(examples), do: is_list(examples)
+
+  defp validate_tool_policy(tools) do
+    cond do
+      not is_nil(tools["tool_choice"]) and
+        tools["tool_choice"] not in ["auto", "none", "required"] and
+          not is_map(tools["tool_choice"]) ->
+        {:error, :invalid_tools}
+
+      not is_nil(tools["parallel_tool_calls"]) and not is_boolean(tools["parallel_tool_calls"]) ->
+        {:error, :invalid_tools}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp strip_tool_metadata(tool) do
+    tool
+    |> Decisions.normalize()
+    |> Map.drop(["output_schema", "output_examples"])
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp reject_tool_param_conflicts(params, tool_fields) when map_size(tool_fields) == 0,
+    do: {:ok, params}
+
+  defp reject_tool_param_conflicts(params, tool_fields) do
+    conflicts =
+      tool_fields
+      |> Map.keys()
+      |> Enum.filter(&(Map.has_key?(params, &1) and params[&1] != tool_fields[&1]))
+      |> Enum.sort()
+
+    if conflicts == [] do
+      {:ok, Map.drop(params, Map.keys(tool_fields))}
+    else
+      {:error, {:tool_param_conflict, conflicts}}
+    end
+  end
+
+  defp valid_message?(%{"role" => role} = message),
     do:
-      role in ["system", "user", "assistant", "developer", "tool"] and is_binary(content) and
+      role in ["system", "user", "assistant", "developer", "tool"] and
         Decisions.json?(message)
 
   defp valid_message?(_), do: false

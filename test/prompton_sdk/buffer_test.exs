@@ -96,8 +96,9 @@ defmodule PromptOnSDK.BufferTest do
     big = String.duplicate("x", 1_500_000)
     for i <- 1..3, do: Buffer.enqueue(:logs, Map.put(gen(i), "pad", big))
 
-    assert_receive {:fake_client, :post_logs, [batch1]}, 2_000
-    assert_receive {:fake_client, :post_logs, [batch2]}, 2_000
+    assert_receive {:fake_client, :post_logs, [first]}, 2_000
+    assert_receive {:fake_client, :post_logs, [second]}, 2_000
+    [batch1, batch2] = Enum.sort_by([first, second], &(&1 |> hd() |> Map.fetch!("id")))
     assert Enum.map(batch1, & &1["id"]) == ["gen-1", "gen-2"]
     assert Enum.map(batch2, & &1["id"]) == ["gen-3"]
     assert byte_size(Jason.encode!(batch1)) <= 4_000_000

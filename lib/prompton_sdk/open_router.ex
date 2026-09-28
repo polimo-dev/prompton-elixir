@@ -23,7 +23,7 @@ defmodule PromptOnSDK.OpenRouter do
   `PromptOnSDK.track/3`.
   """
 
-  alias PromptOnSDK.{Params, Prompt, Resolution}
+  alias PromptOnSDK.{Decisions, Params, Prompt, Resolution}
 
   @doc """
   OpenRouter `POST /chat/completions` body.
@@ -43,10 +43,36 @@ defmodule PromptOnSDK.OpenRouter do
     body =
       %{"model" => r.model, "messages" => messages, "usage" => %{"include" => true}}
       |> Map.merge(params)
+      |> Map.merge(tool_fields(r.tools))
       |> put_provider(r.provider_options)
 
     Map.merge(body, Params.stringify_keys(overrides))
   end
+
+  defp tool_fields(nil), do: %{}
+
+  defp tool_fields(tools) do
+    tools = Decisions.normalize(tools)
+
+    if is_list(tools["definitions"]) do
+      %{"tools" => Enum.map(tools["definitions"], &strip_tool_metadata/1)}
+      |> maybe_put("tool_choice", tools["tool_choice"])
+      |> maybe_put("parallel_tool_calls", tools["parallel_tool_calls"])
+    else
+      %{}
+    end
+  end
+
+  defp strip_tool_metadata(tool) when is_map(tool) do
+    tool
+    |> Decisions.normalize()
+    |> Map.drop(["output_schema", "output_examples"])
+  end
+
+  defp strip_tool_metadata(other), do: other
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   defp put_provider(body, opts) when is_map(opts) and map_size(opts) > 0 do
     Map.put(body, "provider", Params.stringify_keys(opts))

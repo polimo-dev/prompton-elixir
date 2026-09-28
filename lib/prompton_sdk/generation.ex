@@ -154,6 +154,9 @@ defmodule PromptOnSDK.Generation do
       %{}
       |> maybe_put("variables", meta[:variables] && Params.stringify_keys(meta[:variables]))
       |> maybe_put("messages", meta[:input_messages])
+      |> maybe_put("tools", meta[:input_tools])
+      |> maybe_put("tool_choice", meta[:input_tool_choice])
+      |> maybe_put("parallel_tool_calls", meta[:input_parallel_tool_calls])
       |> maybe_put(
         "decision",
         meta[:input_decision] && PromptOnSDK.Decisions.normalize(meta[:input_decision])
@@ -257,6 +260,9 @@ defmodule PromptOnSDK.Generation do
       :trace_id,
       :sequence,
       :input_messages,
+      :input_tools,
+      :input_tool_choice,
+      :input_parallel_tool_calls,
       :input_decision,
       :variables,
       :metadata,

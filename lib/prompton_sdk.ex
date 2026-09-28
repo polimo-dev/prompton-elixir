@@ -72,6 +72,7 @@ defmodule PromptOnSDK do
   alias PromptOnSDK.{
     Buffer,
     Config,
+    Decisions,
     Payload,
     Prompt,
     Resolution,
@@ -256,6 +257,60 @@ defmodule PromptOnSDK do
       :ok
   end
 
+  @event_kinds ~w(tool_attempt completion)
+  @event_statuses ~w(started ok error denied cancelled timeout missing incomplete)
+
+  @doc """
+  Submits trace events for monitored tool attempts or completion outcomes.
+
+  Events are normalized once before retrying: missing `event_id`, `observed_at`, and `sdk` are
+  filled by the SDK, then the exact event maps are either enqueued on the buffer (`sync: false`,
+  the default) or posted immediately (`sync: true`). The SDK only records the events supplied by
+  the application; it never calls customer tools or infers tool attempts from model `tool_calls`.
+
+  Required event fields after defaults are `trace_id`, `event_kind`, `status`, and `observed_at`.
+  `event_kind` must be `"tool_attempt"` or `"completion"`; `status` must be one of
+  `"started"`, `"ok"`, `"error"`, `"denied"`, `"cancelled"`, `"timeout"`, `"missing"`, or
+  `"incomplete"`. A single call accepts at most 500 events.
+
+  With `sync: true`, returns the server response (including any `rejected` evidence). With
+  `mode: :test`, sends `{:prompton_events, events}` to the calling process.
+  """
+  @spec log_events(map() | [map()], keyword()) ::
+          :ok | {:ok, PromptOnSDK.Client.post_response()} | {:error, term()}
+  def log_events(events, opts \\ []) do
+    config = Config.get()
+
+    with {:ok, events} <- normalize_events(events) do
+      submit_events(config, events, opts)
+    end
+  rescue
+    e ->
+      Logger.warning("[PromptOn] log_events/2 dropped events: #{Exception.message(e)}")
+      {:error, :invalid_events}
+  catch
+    kind, value ->
+      Logger.warning("[PromptOn] log_events/2 dropped events: #{inspect({kind, value})}")
+      {:error, :invalid_events}
+  end
+
+  defp submit_events(%{mode: :test}, events, opts) do
+    send(self(), {:prompton_events, events})
+
+    if Keyword.get(opts, :sync, false),
+      do: {:ok, accepted_events_response(events)},
+      else: :ok
+  end
+
+  defp submit_events(config, events, opts) do
+    if Keyword.get(opts, :sync, false) do
+      post_events_now(config, events, Keyword.get(opts, :timeout, 5_000))
+    else
+      Enum.each(events, &dispatch(:events, {:prompton_event, &1}, &1, config))
+      :ok
+    end
+  end
+
   @doc """
   One feedback item (§6.5: `log_id`★, `kind`★, `value`, `comment`, `end_user_ref`,
   `occurred_at`, `evaluator` (kind "score")).
@@ -283,6 +338,110 @@ defmodule PromptOnSDK do
       Logger.warning("[PromptOn] feedback/1 dropped: #{Exception.message(e)}")
       :ok
   end
+
+  defp normalize_events(event) when is_map(event), do: normalize_events([event])
+
+  defp normalize_events(events) when is_list(events) do
+    cond do
+      events == [] -> {:error, :empty_events}
+      length(events) > 500 -> {:error, {:too_many_events, length(events)}}
+      true -> normalize_event_list(events)
+    end
+  end
+
+  defp normalize_events(_events), do: {:error, :invalid_events}
+
+  defp normalize_event_list(events) do
+    events
+    |> Enum.with_index(1)
+    |> Enum.reduce_while({:ok, []}, &normalize_event_item/2)
+    |> finalize_event_list()
+  end
+
+  defp normalize_event_item({event, index}, {:ok, acc}) do
+    case normalize_event(event) do
+      {:ok, event} -> {:cont, {:ok, [event | acc]}}
+      {:error, reason} -> {:halt, {:error, {:invalid_event, index, reason}}}
+    end
+  end
+
+  defp finalize_event_list({:ok, normalized}), do: {:ok, Enum.reverse(normalized)}
+  defp finalize_event_list(error), do: error
+
+  defp normalize_event(event) when is_map(event) and not is_struct(event) do
+    event =
+      event
+      |> normalize_event_keys()
+      |> Map.put_new_lazy("event_id", &UUIDv7.generate/0)
+      |> Map.put_new_lazy("observed_at", fn -> DateTime.to_iso8601(DateTime.utc_now()) end)
+      |> Map.put_new("sdk", %{"name" => "prompton_sdk", "version" => @version})
+      |> normalize_event_times()
+
+    cond do
+      not string_present?(event["event_id"]) ->
+        {:error, :event_id_required}
+
+      not string_present?(event["trace_id"]) ->
+        {:error, :trace_id_required}
+
+      event["event_kind"] not in @event_kinds ->
+        {:error, :invalid_event_kind}
+
+      event["status"] not in @event_statuses ->
+        {:error, :invalid_status}
+
+      not string_present?(event["observed_at"]) ->
+        {:error, :observed_at_required}
+
+      not Decisions.json?(event) ->
+        {:error, :invalid_json}
+
+      true ->
+        {:ok, event}
+    end
+  end
+
+  defp normalize_event(_event), do: {:error, :invalid_event}
+
+  defp normalize_event_keys(event) do
+    event
+    |> Decisions.normalize()
+    |> Map.update("event_kind", nil, &to_event_string/1)
+    |> Map.update("status", nil, &to_event_string/1)
+  end
+
+  defp normalize_event_times(event) do
+    Enum.reduce(["observed_at", "started_at", "finished_at"], event, fn key, acc ->
+      case Map.get(acc, key) do
+        %DateTime{} = datetime -> Map.put(acc, key, DateTime.to_iso8601(datetime))
+        %NaiveDateTime{} = datetime -> Map.put(acc, key, NaiveDateTime.to_iso8601(datetime))
+        value -> Map.put(acc, key, value)
+      end
+    end)
+  end
+
+  defp post_events_now(config, events, timeout) do
+    config = %{config | http: Keyword.put(config.http, :receive_timeout, timeout)}
+
+    case config.client.post_events(config, events) do
+      {:ok, %{status: status} = response} when status in 200..299 -> {:ok, response}
+      {:ok, %{status: status, body: body}} -> {:error, {:http_error, status, body}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp accepted_events_response(events) do
+    %{
+      status: 202,
+      body: %{"accepted" => length(events), "duplicates" => 0, "rejected" => []},
+      headers: %{}
+    }
+  end
+
+  defp to_event_string(value) when is_atom(value), do: Atom.to_string(value)
+  defp to_event_string(value), do: value
+
+  defp string_present?(value), do: is_binary(value) and String.trim(value) != ""
 
   defp hash_feedback_user(%{"end_user_ref" => ref} = item, %{hash_end_user: true})
        when not is_nil(ref) do

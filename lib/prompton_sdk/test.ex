@@ -169,7 +169,8 @@ defmodule PromptOnSDK.Test do
       "number" => 1,
       "kind" => "chat",
       "engine" => to_string(Map.get(spec, :engine, :liquid)),
-      "messages" => Map.get(spec, :messages) || []
+      "messages" => Map.get(spec, :messages) || [],
+      "tools" => Map.get(spec, :tools)
     }
   end
 

@@ -339,7 +339,7 @@ defmodule PromptOnSDK.ConformanceTest do
 
   defp fill_prompt(_r, _variables), do: {:ok, %{}}
 
-  defp message_map(m), do: %{"role" => m[:role], "content" => m[:content]}
+  defp message_map(m), do: PromptOnSDK.Decisions.normalize(m)
 
   defp assert_optional_enum(nil, _allowed, _label), do: :ok
 

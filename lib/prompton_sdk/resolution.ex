@@ -3,7 +3,7 @@ defmodule PromptOnSDK.Resolution do
 
   @type message :: %{
           required(:role) => String.t(),
-          required(:content) => String.t(),
+          optional(:content) => term(),
           optional(:name) => String.t() | nil
         }
 
@@ -27,6 +27,7 @@ defmodule PromptOnSDK.Resolution do
           params: map(),
           provider_options: map(),
           messages: [message()] | nil,
+          tools: map() | nil,
           text_template: String.t() | nil,
           input_schema: [map()],
           source: source(),
@@ -52,6 +53,7 @@ defmodule PromptOnSDK.Resolution do
             params: %{},
             provider_options: %{},
             messages: nil,
+            tools: nil,
             text_template: nil,
             input_schema: [],
             source: :remote,

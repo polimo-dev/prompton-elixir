@@ -23,7 +23,7 @@ defmodule PromptOnSDK.FakeClient do
 
   def child_spec(_), do: %{id: __MODULE__, start: {__MODULE__, :start_link, [[]]}}
 
-  def set(name, fun) when name in [:fetch_prompts, :post_logs, :post_feedback] do
+  def set(name, fun) when name in [:fetch_prompts, :post_logs, :post_feedback, :post_events] do
     Agent.update(__MODULE__, &put_in(&1, [:handlers, name], fun))
   end
 
@@ -45,6 +45,9 @@ defmodule PromptOnSDK.FakeClient do
 
   @impl true
   def post_feedback(_config, items), do: call(:post_feedback, [items])
+
+  @impl true
+  def post_events(_config, items), do: call(:post_events, [items])
 
   defp call(name, args) do
     state =

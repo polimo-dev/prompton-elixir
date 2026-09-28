@@ -2,7 +2,8 @@ defmodule PromptOnSDK.PromptDocument do
   @moduledoc """
   Decodes the `GET /prompts` response into the SDK's prompt document structure.
 
-  The SDK reads **schema v6 and legacy v5**. Prepared requests require v6 metadata. A document contains deployed prompts, their deployments,
+  The SDK reads **schema v7, schema v6, and legacy v5**. Prepared requests require v6+
+  metadata. A document contains deployed prompts, their deployments,
   pinned template versions, and model records. The decoded value is consumed by
   `PromptOnSDK.prompt/2` and by test helpers.
 
@@ -10,7 +11,7 @@ defmodule PromptOnSDK.PromptDocument do
   expected to be JSON/string-keyed maps.
   """
 
-  @schema_version 6
+  @schema_version 7
   @kinds ~w(chat decision text embedding)
   @apis ~w(chat_completions decisions)
   @engines ~w(liquid raw)
@@ -26,9 +27,10 @@ defmodule PromptOnSDK.PromptDocument do
   @atom_keys ~w(
     api capabilities content context_length decision default_params deployments description display_name encrypt
     encrypt? engine environment example id input_schema kind max_bytes messages metadata mode
-    model_id models name number params payload_policy pricing project prompt_template_id template_pins
-    prompt_versions provider provider_options required required? retention_days revision role
-    request_path sample_rate schema_version status text_template prompts
+    model_id models name number output_examples output_schema parallel_tool_calls params payload_policy
+    pricing project prompt_template_id template_pins prompt_versions provider provider_options required
+    required? retention_days revision role request_path sample_rate schema_version status text_template
+    tool_choice tools type prompts
   )
   @atom_key_lookup Map.new(@atom_keys, &{&1, String.to_atom(&1)})
 
@@ -64,6 +66,7 @@ defmodule PromptOnSDK.PromptDocument do
           kind: atom() | nil,
           decision: map() | nil,
           messages: [PromptOnSDK.Prompt.message()] | nil,
+          tools: map() | nil,
           text_template: String.t() | nil
         }
 
@@ -160,7 +163,7 @@ defmodule PromptOnSDK.PromptDocument do
 
   defp schema_version(map), do: check_schema_version(get(map, "schema_version"))
 
-  defp check_schema_version(version) when version in [5, @schema_version],
+  defp check_schema_version(version) when version in [5, 6, @schema_version],
     do: {:ok, version, []}
 
   defp check_schema_version(v) when is_integer(v) and v > 0,
@@ -301,9 +304,9 @@ defmodule PromptOnSDK.PromptDocument do
     {pins, warnings} = decode_template_pins(get(raw, "template_pins"), key, warnings)
 
     {api, warnings} =
-      to_enum(if(version == 6, do: get(raw, "api")), @apis, nil, :unknown_api, warnings)
+      to_enum(if(version >= 6, do: get(raw, "api")), @apis, nil, :unknown_api, warnings)
 
-    request_path = if version == 6, do: get(raw, "request_path")
+    request_path = if version >= 6, do: get(raw, "request_path")
 
     {%{
        id: to_str(get(raw, "id")),
@@ -376,7 +379,7 @@ defmodule PromptOnSDK.PromptDocument do
   defp decode_prompt_version(raw, version, warnings) do
     {kind, warnings} =
       to_enum(
-        if(version == 6, do: get(raw, "kind")),
+        if(version >= 6, do: get(raw, "kind")),
         @kinds,
         nil,
         :unknown_version_kind,
@@ -392,8 +395,9 @@ defmodule PromptOnSDK.PromptDocument do
        number: to_int(get(raw, "number"), nil),
        engine: engine,
        kind: kind,
-       decision: if(version == 6, do: PromptOnSDK.Decisions.normalize(get(raw, "decision"))),
+       decision: if(version >= 6, do: PromptOnSDK.Decisions.normalize(get(raw, "decision"))),
        messages: messages,
+       tools: decode_tools(get(raw, "tools")),
        text_template: to_str(get(raw, "text_template"))
      }, warnings}
   end
@@ -403,15 +407,7 @@ defmodule PromptOnSDK.PromptDocument do
   defp decode_messages(list, warnings) when is_list(list) do
     Enum.map_reduce(list, warnings, fn
       msg, warnings when is_map(msg) ->
-        message = %{role: to_str(get(msg, "role")), content: to_str(get(msg, "content")) || ""}
-
-        message =
-          case to_str(get(msg, "name")) do
-            nil -> message
-            name -> Map.put(message, :name, name)
-          end
-
-        {message, warnings}
+        {decode_message(msg), warnings}
 
       other, warnings ->
         {nil, [{:invalid_message, other} | warnings]}
@@ -420,6 +416,36 @@ defmodule PromptOnSDK.PromptDocument do
   end
 
   defp decode_messages(other, warnings), do: {nil, [{:invalid_messages, other} | warnings]}
+
+  defp decode_message(msg) do
+    base = PromptOnSDK.Decisions.normalize(msg)
+
+    if base["type"] == "slot" do
+      %{"type" => "slot", "name" => to_str(get(msg, "name"))}
+    else
+      message = %{role: to_str(get(msg, "role"))}
+
+      message =
+        if Map.has_key?(base, "content") do
+          Map.put(message, :content, base["content"])
+        else
+          message
+        end
+
+      message =
+        case to_str(get(msg, "name")) do
+          nil -> message
+          name -> Map.put(message, :name, name)
+        end
+
+      extras = Map.drop(base, ~w(role content name))
+      Map.merge(extras, message)
+    end
+  end
+
+  defp decode_tools(nil), do: nil
+  defp decode_tools(raw) when is_map(raw), do: PromptOnSDK.Decisions.normalize(raw)
+  defp decode_tools(_), do: nil
 
   defp decode_model(raw, warnings) do
     {%{

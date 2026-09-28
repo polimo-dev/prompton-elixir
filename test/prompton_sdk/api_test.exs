@@ -38,6 +38,41 @@ defmodule PromptOnSDK.APITest do
                       }}
     end
 
+    test "request records prepared messages and tools for the next generation log" do
+      PromptOnSDK.Test.stub("tool_chat", %{
+        model: "openai/gpt-5-mini",
+        api: :chat_completions,
+        request_path: "/api/v1/chat/completions",
+        messages: [%{role: "user", content: "{{ input }}"}],
+        tools: %{
+          definitions: [
+            %{
+              type: "function",
+              function: %{name: "lookup", parameters: %{type: "object"}},
+              output_schema: %{type: "object"}
+            }
+          ],
+          tool_choice: "auto",
+          parallel_tool_calls: false
+        }
+      })
+
+      {:ok, prompt} = PromptOnSDK.prompt("tool_chat")
+      assert {:ok, request} = PromptOnSDK.request(prompt, %{input: "hi"})
+
+      assert {:ok, %{content: "ok"}} =
+               PromptOnSDK.track(prompt, %{id: "tool-log"}, fn ->
+                 {:ok, %{content: "ok"}}
+               end)
+
+      log = assert_logged(%{"id" => "tool-log"})
+      assert log["input"]["messages"] == request.body["messages"]
+      assert log["input"]["tools"] == request.body["tools"]
+      assert log["input"]["tool_choice"] == "auto"
+      assert log["input"]["parallel_tool_calls"] == false
+      refute log["input"]["tools"] |> hd() |> Map.has_key?("output_schema")
+    end
+
     test "prompt errors pass through" do
       assert PromptOnSDK.prompt("nope") == {:error, :unknown_prompt}
       assert PromptOnSDK.prompt("transcript_revision") == {:error, :unresolved}
@@ -477,6 +512,83 @@ defmodule PromptOnSDK.APITest do
   end
 
   describe "live mode without a buffer" do
+    test "log_events/2 normalizes trace events and sends them in test mode" do
+      observed_at = DateTime.utc_now()
+
+      assert :ok =
+               PromptOnSDK.log_events(%{
+                 trace_id: "trace-1",
+                 event_kind: :tool_attempt,
+                 status: :ok,
+                 observed_at: observed_at,
+                 tool_call_id: "call_1",
+                 tool_name: "search_diary",
+                 result: %{content: [%{type: "text", text: "found"}]}
+               })
+
+      assert_receive {:prompton_events, [event]}
+      assert event["trace_id"] == "trace-1"
+      assert event["event_kind"] == "tool_attempt"
+      assert event["status"] == "ok"
+      assert is_binary(event["event_id"])
+      assert event["observed_at"] == DateTime.to_iso8601(observed_at)
+      assert event["result"] == %{"content" => [%{"type" => "text", "text" => "found"}]}
+      assert event["sdk"] == %{"name" => "prompton_sdk", "version" => PromptOnSDK.version()}
+    end
+
+    test "log_events/2 validates required fields and allowed enums" do
+      assert {:error, {:invalid_event, 1, :trace_id_required}} =
+               PromptOnSDK.log_events(%{event_kind: "tool_attempt", status: "ok"})
+
+      assert {:error, {:invalid_event, 1, :invalid_event_kind}} =
+               PromptOnSDK.log_events(%{trace_id: "trace-1", event_kind: "unknown", status: "ok"})
+
+      assert {:error, {:too_many_events, 501}} =
+               PromptOnSDK.log_events(
+                 for i <- 1..501 do
+                   %{trace_id: "trace-#{i}", event_kind: "completion", status: "ok"}
+                 end
+               )
+    end
+
+    test "log_events/2 sync posts events and preserves rejected evidence" do
+      Application.put_env(:prompton_sdk, :mode, :live)
+      Application.put_env(:prompton_sdk, :base_url, "http://prompton.test/api/v1")
+      Application.put_env(:prompton_sdk, :client, FakeClient)
+      FakeClient.notify(self())
+
+      FakeClient.set(:post_events, fn events ->
+        assert [%{"event_id" => "evt-1", "trace_id" => "trace-1"}] = events
+
+        {:ok,
+         %{
+           status: 202,
+           body: %{
+             "accepted" => 0,
+             "duplicates" => 0,
+             "rejected" => [%{"event_id" => "evt-1", "reason" => "bad evidence"}]
+           },
+           headers: %{}
+         }}
+      end)
+
+      assert {:ok, %{status: 202, body: body}} =
+               PromptOnSDK.log_events(
+                 %{
+                   event_id: "evt-1",
+                   trace_id: "trace-1",
+                   event_kind: "completion",
+                   status: "incomplete"
+                 },
+                 sync: true,
+                 timeout: 1234
+               )
+
+      assert body["rejected"] == [%{"event_id" => "evt-1", "reason" => "bad evidence"}]
+      assert_receive {:fake_client, :post_events, [[%{"event_id" => "evt-1"} = event]]}
+      assert event["observed_at"]
+    end
+
     test "log/1 drops with a once-per-minute warning and dropped telemetry" do
       Application.put_env(:prompton_sdk, :mode, :live)
       attach_telemetry([[:prompton, :log, :dropped]])
@@ -495,6 +607,27 @@ defmodule PromptOnSDK.APITest do
   end
 
   describe "live mode end-to-end through the buffer" do
+    test "log_events/2 async path uses Buffer → client.post_events" do
+      Application.delete_env(:prompton_sdk, :mode)
+      FakeClient.notify(self())
+      FakeClient.set(:fetch_prompts, fn _, _ -> {:error, :offline} end)
+      FakeClient.set(:post_events, fn events -> ok_202(length(events)) end)
+      bundle = tmp_path("prompts.production.json")
+      write_snapshot_file(bundle, Fixtures.snapshot())
+      start_sdk(bundle: {:file, bundle}, log: [flush_size: 1, flush_interval: 60_000])
+
+      assert :ok =
+               PromptOnSDK.log_events(%{
+                 event_id: "evt-async",
+                 trace_id: "trace-async",
+                 event_kind: "tool_attempt",
+                 status: "started"
+               })
+
+      assert_receive {:fake_client, :post_events, [[%{"event_id" => "evt-async"}]]}, 500
+      refute_receive {:prompton_events, _}, 10
+    end
+
     test "track → Buffer → client.post_logs" do
       Application.delete_env(:prompton_sdk, :mode)
       FakeClient.notify(self())

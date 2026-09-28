@@ -87,7 +87,7 @@ defmodule PromptOnSDK.Client.ReqTest do
              )
   end
 
-  test "post_logs / post_feedback send JSON envelopes and flatten headers" do
+  test "post_logs / post_feedback / post_events send JSON envelopes and flatten headers" do
     test_pid = self()
 
     adapter = fn req ->
@@ -107,7 +107,7 @@ defmodule PromptOnSDK.Client.ReqTest do
 
     assert_received {:req, req}
     assert req.method == :post
-    assert URI.to_string(req.url) == "https://prompton.test/api/v1/logs"
+    assert URI.to_string(req.url) == "https://prompton.test/api/v1/logs?environment=production"
     assert Jason.decode!(req.body) == %{"logs" => [%{"id" => "g1"}]}
     assert header(req, "content-type") == ["application/json"]
     assert req.options[:receive_timeout] == 123
@@ -122,6 +122,17 @@ defmodule PromptOnSDK.Client.ReqTest do
 
     assert Jason.decode!(req.body) == %{
              "feedback" => [%{"log_id" => "g1", "kind" => "thumbs"}]
+           }
+
+    assert {:ok, %{status: 429}} =
+             Client.post_events(config(adapter), [%{"event_id" => "evt_1"}])
+
+    assert_received {:req, req}
+    assert URI.to_string(req.url) == "https://prompton.test/api/v1/logs?environment=production"
+
+    assert Jason.decode!(req.body) == %{
+             "logs" => [],
+             "events" => [%{"event_id" => "evt_1"}]
            }
   end
 

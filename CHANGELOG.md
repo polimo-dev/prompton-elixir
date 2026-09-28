@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0
+
+- Read schema v7 prompt documents with chat tool definitions and dynamic message slots.
+- Preserve native chat message fields, including tool calls and tool response linkage, during rendering.
+- Prepare Chat provider requests with canonical tools while stripping PromptOn-only tool metadata.
+- Add `PromptOnSDK.log_events/2` for tool-attempt/completion trace events and preserve prepared request messages/tools in generation logs.
+
 ## 0.3.1
 
 - Use OpenRouter's System One route `/api/v1/systemone` for new Decision prepared requests.

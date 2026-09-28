@@ -24,13 +24,13 @@ Once published, the hex line will be:
 
 ```elixir
 def deps do
-  [{:prompton_sdk, "~> 0.3"}]
+  [{:prompton_sdk, "~> 0.4"}]
 end
 ```
 
 ## Prepared provider requests
 
-SDK 0.3 reads schema v6 documents and returns the deployed API, origin-relative path and rendered
+SDK 0.4 reads schema v7 documents and returns the deployed API, origin-relative path and rendered
 body. Your app supplies the provider origin and credentials and sends the HTTP request:
 
 ```elixir
@@ -49,13 +49,45 @@ inferred from its model name. The pinned version determines the serving type eve
 type changes. Chat requests render `messages`; Decision requests render native `state` and `questions`
 recursively in string values, preserving JSON types, question names and choice labels.
 
+Chat prompts may include a message slot such as `%{"type" => "slot", "name" => "history"}`.
+Pass `%{"history" => [...]}` with native chat message maps and the SDK splices those messages into
+the prepared request without rendering their content. This preserves `tool_calls`, `tool_call_id`,
+null content, array content and provider-specific JSON fields from your app's conversation state.
+
+Schema v7 prompt versions may also include canonical tool configuration:
+
+```json
+{
+  "tools": {
+    "definitions": [
+      {
+        "type": "function",
+        "function": {"name": "search_diary", "parameters": {"type": "object"}},
+        "output_schema": {"type": "object"},
+        "output_examples": [{"entries": []}]
+      }
+    ],
+    "tool_choice": "auto",
+    "parallel_tool_calls": true
+  }
+}
+```
+
+`definitions` are provider-native OpenAI-style function tools. PromptOn-only `output_schema` and
+`output_examples` stay available to editors/evals but are stripped before the provider request; they
+must be JSON objects/lists when present. Unknown PromptOn tool-definition metadata is rejected before
+any provider call. If a legacy `params` map also contains `tools`, `tool_choice` or
+`parallel_tool_calls`, it must match the canonical value exactly; otherwise `request/3` returns
+`{:error, {:tool_param_conflict, keys}}`.
+
 Supported explicit routes are OpenRouter Chat (`/api/v1/chat/completions`) and System One Decisions
 (`/api/v1/systemone`), OpenAI Chat (`/v1/chat/completions`), and Groq Chat
 (`/openai/v1/chat/completions`). Existing OpenRouter Decision deployments pinned to the legacy
 `/api/alpha/decisions` route still prepare successfully. Unsupported providers, missing metadata,
 API/type mismatches and invalid native questions return an error before a provider call. Legacy schema
-v5 documents remain readable by `messages/3` and `text/3`, but cannot prepare a request. Upgrade the
-server and cached/bundled document to schema v6 when adopting `request/3`.
+v5 documents remain readable by `messages/3` and `text/3`, but cannot prepare a request. Schema v6
+documents can still prepare requests without canonical tools. Upgrade the server and cached/bundled
+document to schema v7 when adopting editor-managed tool definitions.
 
 Options include `template:`, shallow `params:` and `provider_options:` overrides. Chat omits nil
 parameter values; provider options preserve explicit nil as JSON null. Decisions accept only
@@ -194,8 +226,44 @@ When `messages/3` or `text/3` renders with `template: "name"`, the SDK stores th
 process-local, one-shot state so the next `track/3` for the same prompt records matching
 `template`/`prompt_version_id` evidence even if `track` meta omits `template:`. `track/3` consumes and
 clears that state; render failures, default renders, and explicit `track(..., template: ...)` also
-clear/override it. Request context (language, plan, whatever you tag calls with) is a
-**log-only** passthrough now: hand it to `track` as `meta.context`.
+clear/override it. `request/3` also stores the prepared request input in process-local, one-shot
+state, so the next `track/3` for that prompt logs the actual rendered `input.messages` and effective
+`input.tools` from the provider body unless you pass explicit `input_messages` / `input_tools` meta.
+Request context (language, plan, whatever you tag calls with) is a **log-only** passthrough now: hand
+it to `track` as `meta.context`.
+
+Tool and completion trace events can be submitted separately from generation logs:
+
+```elixir
+PromptOnSDK.log_events([
+  %{
+    trace_id: "ticket:88213",
+    event_kind: "tool_attempt",
+    status: "ok",
+    tool_call_id: "call_1",
+    tool_name: "search_diary",
+    arguments: %{query: "invoice"},
+    result: %{content: [%{type: "text", text: "found 3 entries"}]}
+  },
+  %{
+    trace_id: "ticket:88213",
+    event_kind: "completion",
+    status: "ok",
+    completion_output: %{content: "Done"}
+  }
+])
+
+{:ok, response} = PromptOnSDK.log_events(event, sync: true, timeout: 5_000)
+# response.body preserves server `rejected` evidence for eval ingestion/debugging.
+```
+
+`log_events/2` fills missing `event_id`, `observed_at`, and `sdk` once before enqueueing, accepts at
+most 500 events, and posts them to `/api/v1/logs?environment=<slug>` as `%{"logs" => [], "events" => events}`.
+`arguments` must be an object. `result`, `error`, `completion_output`, and `outcome_evidence` may be
+any JSON value, including `null`, arrays, or scalars. `completeness`, when present, is an object like
+`%{truncated: false, omitted: false, expected_events: [event_id], unresolved_tool_calls: [tool_call_id]}`.
+The SDK never calls customer tools or infers tool attempts from model `tool_calls`; pass actual app
+tool attempts/results from your own execution path.
 
 Other entry points: `PromptOnSDK.template_names/1` (which template names the live deployment pins),
 `PromptOnSDK.log_id/0` (pre-issued UUIDv7 for later scoring), `PromptOnSDK.log/1` (manual, e.g. after
@@ -203,9 +271,9 @@ streaming), `PromptOnSDK.feedback/1` (`%{log_id, kind, value, …}`),
 `PromptOnSDK.Result.from_openai/1`, `PromptOnSDK.Result.from_anthropic/1`, and
 `PromptOnSDK.Result.from_generic/1` for provider/application result normalization.
 
-## Prompt document v5 — a deployment is a pin, not a router
+## Prompt document v7 — a deployment is a pin, not a router
 
-The SDK reads **schema v6 and legacy v5**; prepared requests require v6 metadata. A deployment revision no longer routes: no rules, no conditions, no targets,
+The SDK reads **schema v7, schema v6 and legacy v5**; prepared requests require v6+ metadata. A deployment revision no longer routes: no rules, no conditions, no targets,
 no weights, no A/B, no context dimensions. One revision is **one model** plus **one pinned template version per
 template name**:
 

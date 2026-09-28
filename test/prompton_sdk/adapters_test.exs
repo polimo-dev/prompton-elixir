@@ -63,6 +63,36 @@ defmodule PromptOnSDK.AdaptersTest do
       assert body["top_p"] == 0.9
     end
 
+    test "canonical tools are included with PromptOn metadata stripped" do
+      r = %{
+        resolve("chat_response")
+        | tools: %{
+            "definitions" => [
+              %{
+                "type" => "function",
+                "function" => %{"name" => "lookup", "parameters" => %{"type" => "object"}},
+                "output_schema" => %{"type" => "object"},
+                "output_examples" => [%{"ok" => true}]
+              }
+            ],
+            "tool_choice" => "auto"
+          }
+      }
+
+      body = OpenRouter.request_body(r, [])
+
+      assert body["tools"] == [
+               %{
+                 "type" => "function",
+                 "function" => %{"name" => "lookup", "parameters" => %{"type" => "object"}}
+               }
+             ]
+
+      assert body["tool_choice"] == "auto"
+      refute body["tools"] |> hd() |> Map.has_key?("output_schema")
+      refute body["tools"] |> hd() |> Map.has_key?("output_examples")
+    end
+
     test "accepts only public Prompt structs" do
       {:ok, internal_resolution} = Resolver.resolve(Fixtures.snapshot_data(), "chat_response")
       request_body = Function.capture(OpenRouter, :request_body, 2)

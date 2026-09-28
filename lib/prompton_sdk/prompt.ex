@@ -9,10 +9,11 @@ defmodule PromptOnSDK.Prompt do
   alias PromptOnSDK.{Generation, ProviderRequest, Resolution, Template}
 
   @selection_key {__MODULE__, :selected_prompts}
+  @prepared_key {__MODULE__, :prepared_requests}
 
   @type message :: %{
           required(:role) => String.t(),
-          required(:content) => String.t(),
+          optional(:content) => term(),
           optional(:name) => String.t() | nil
         }
 
@@ -33,6 +34,7 @@ defmodule PromptOnSDK.Prompt do
           prompt_version: %{id: String.t() | nil, number: non_neg_integer() | nil} | nil,
           engine: :liquid | :raw | nil,
           messages: [message()] | nil,
+          tools: map() | nil,
           text_template: String.t() | nil,
           source: atom(),
           input_schema: [map()],
@@ -57,6 +59,7 @@ defmodule PromptOnSDK.Prompt do
             prompt_version: nil,
             engine: nil,
             messages: nil,
+            tools: nil,
             text_template: nil,
             source: :remote,
             input_schema: [],
@@ -86,6 +89,7 @@ defmodule PromptOnSDK.Prompt do
           %{id: r.prompt_version_id, number: r.prompt_version_number},
       engine: r.engine,
       messages: r.messages,
+      tools: Map.get(r, :tools),
       text_template: r.text_template,
       source: r.source,
       input_schema: r.input_schema,
@@ -108,10 +112,12 @@ defmodule PromptOnSDK.Prompt do
           )
 
         remember_prompt_selection(selected, opts, result)
+        remember_prepared_input(selected, result)
         result
 
       error ->
         clear_prompt_selection(prompt)
+        clear_prepared_input(prompt)
         error
     end
   end
@@ -185,7 +191,12 @@ defmodule PromptOnSDK.Prompt do
 
     case select_prompt(prompt, template: template) do
       {:ok, prompt} ->
-        Generation.with_generation(to_resolution(prompt), drop_prompt(meta), fun)
+        meta =
+          meta
+          |> drop_prompt()
+          |> merge_prepared_input(pop_prepared_input(prompt))
+
+        Generation.with_generation(to_resolution(prompt), meta, fun)
 
       {:error, reason} ->
         {:error, reason}
@@ -213,6 +224,7 @@ defmodule PromptOnSDK.Prompt do
       params: prompt.params,
       provider_options: prompt.provider_options,
       messages: prompt.messages,
+      tools: prompt.tools,
       text_template: prompt.text_template,
       input_schema: prompt.input_schema,
       source: prompt.source,
@@ -221,6 +233,81 @@ defmodule PromptOnSDK.Prompt do
       warnings: prompt.warnings
     }
   end
+
+  defp remember_prepared_input(%__MODULE__{} = prompt, {:ok, %{body: body}}) when is_map(body) do
+    input =
+      %{}
+      |> maybe_put(:input_messages, Map.get(body, "messages"))
+      |> maybe_put(:input_tools, Map.get(body, "tools"))
+      |> maybe_put(:input_tool_choice, Map.get(body, "tool_choice"))
+      |> maybe_put(:input_parallel_tool_calls, Map.get(body, "parallel_tool_calls"))
+
+    if map_size(input) == 0 do
+      clear_prepared_input(prompt)
+    else
+      prepared =
+        Process.get(@prepared_key, %{})
+        |> Map.put(prompt.key, input)
+
+      Process.put(@prepared_key, prepared)
+    end
+
+    :ok
+  end
+
+  defp remember_prepared_input(%__MODULE__{} = prompt, _result) do
+    clear_prepared_input(prompt)
+  end
+
+  defp clear_prepared_input(%__MODULE__{} = prompt) do
+    prepared =
+      Process.get(@prepared_key, %{})
+      |> Map.delete(prompt.key)
+
+    if map_size(prepared) == 0 do
+      Process.delete(@prepared_key)
+    else
+      Process.put(@prepared_key, prepared)
+    end
+
+    :ok
+  end
+
+  defp pop_prepared_input(%__MODULE__{} = prompt) do
+    prepared = Process.get(@prepared_key, %{})
+    {input, prepared} = Map.pop(prepared, prompt.key)
+
+    if map_size(prepared) == 0 do
+      Process.delete(@prepared_key)
+    else
+      Process.put(@prepared_key, prepared)
+    end
+
+    input || %{}
+  end
+
+  defp merge_prepared_input(meta, prepared) when prepared == %{}, do: meta
+
+  defp merge_prepared_input(meta, prepared) when is_list(meta) do
+    meta
+    |> Map.new()
+    |> merge_prepared_input(prepared)
+  end
+
+  defp merge_prepared_input(meta, prepared) when is_map(meta) do
+    Enum.reduce(prepared, meta, fn {key, value}, acc ->
+      if has_meta_key?(acc, key), do: acc, else: Map.put(acc, key, value)
+    end)
+  end
+
+  defp merge_prepared_input(meta, _prepared), do: meta
+
+  defp has_meta_key?(meta, key) do
+    Map.has_key?(meta, key) or Map.has_key?(meta, Atom.to_string(key))
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   defp select_prompt(prompt, opts) do
     case prompt_opt(opts) do

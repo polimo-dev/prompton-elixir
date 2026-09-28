@@ -104,6 +104,178 @@ defmodule PromptOnSDK.RequestTest do
              r |> Prompt.from_resolution() |> PromptOnSDK.request(%{input: "hello"})
   end
 
+  test "chat prepares canonical tools, stripping PromptOn output metadata" do
+    tools = %{
+      "definitions" => [
+        %{
+          "type" => "function",
+          "function" => %{
+            "name" => "search_diary",
+            "description" => "Search diary entries",
+            "parameters" => %{"type" => "object", "properties" => %{}}
+          },
+          "output_schema" => %{"type" => "object"},
+          "output_examples" => [%{"entries" => []}]
+        }
+      ],
+      "tool_choice" => "auto",
+      "parallel_tool_calls" => true
+    }
+
+    assert {:ok, %{body: body}} =
+             PromptOnSDK.request(%{resolution() | tools: tools}, %{input: "hello"})
+
+    assert body["tools"] == [
+             %{
+               "type" => "function",
+               "function" => %{
+                 "name" => "search_diary",
+                 "description" => "Search diary entries",
+                 "parameters" => %{"type" => "object", "properties" => %{}}
+               }
+             }
+           ]
+
+    assert body["tool_choice"] == "auto"
+    assert body["parallel_tool_calls"] == true
+    refute body["tools"] |> hd() |> Map.has_key?("output_schema")
+    refute body["tools"] |> hd() |> Map.has_key?("output_examples")
+  end
+
+  test "canonical tools reject conflicting legacy params and allow identical params" do
+    tools = %{
+      "definitions" => [%{"type" => "function", "function" => %{"name" => "lookup"}}],
+      "tool_choice" => "auto"
+    }
+
+    canonical_tools = [%{"type" => "function", "function" => %{"name" => "lookup"}}]
+
+    assert {:ok, %{body: body}} =
+             PromptOnSDK.request(
+               %{resolution() | tools: tools, params: %{"tools" => canonical_tools}},
+               %{input: "hello"}
+             )
+
+    assert body["tools"] == canonical_tools
+
+    assert {:error, {:tool_param_conflict, ["tool_choice"]}} =
+             PromptOnSDK.request(
+               %{resolution() | tools: tools, params: %{"tool_choice" => "none"}},
+               %{input: "hello"}
+             )
+  end
+
+  test "canonical tools reject malformed definitions and metadata before provider calls" do
+    invalid_tools = [
+      %{"definitions" => "nope"},
+      %{"definitions" => [%{"type" => "web_search"}]},
+      %{"definitions" => [%{"type" => "function", "function" => %{}}]},
+      %{
+        "definitions" => [
+          %{"type" => "function", "function" => %{"name" => "lookup", "parameters" => []}}
+        ]
+      },
+      %{
+        "definitions" => [
+          %{"type" => "function", "function" => %{"name" => "lookup"}, "output_schema" => []}
+        ]
+      },
+      %{
+        "definitions" => [
+          %{"type" => "function", "function" => %{"name" => "lookup"}, "output_examples" => %{}}
+        ]
+      },
+      %{
+        "definitions" => [
+          %{"type" => "function", "function" => %{"name" => "lookup"}, "unknown" => true}
+        ]
+      },
+      %{
+        "definitions" => [%{"type" => "function", "function" => %{"name" => "lookup"}}],
+        "unknown" => true
+      },
+      %{
+        "definitions" => [%{"type" => "function", "function" => %{"name" => "lookup"}}],
+        "tool_choice" => "invented"
+      },
+      %{
+        "definitions" => [%{"type" => "function", "function" => %{"name" => "lookup"}}],
+        "parallel_tool_calls" => "yes"
+      }
+    ]
+
+    for tools <- invalid_tools do
+      assert {:error, :invalid_tools} =
+               PromptOnSDK.request(%{resolution() | tools: tools}, %{input: "hello"})
+    end
+  end
+
+  test "chat request splices history slots with tool calls" do
+    messages = [
+      %{"role" => "system", "content" => "Tone {{ tone }}."},
+      %{"type" => "slot", "name" => "history"},
+      %{"role" => "user", "content" => "Next {{ input }}"}
+    ]
+
+    history = [
+      %{
+        "role" => "assistant",
+        "content" => nil,
+        "tool_calls" => [
+          %{
+            "id" => "call_1",
+            "type" => "function",
+            "function" => %{"name" => "lookup", "arguments" => "{}"}
+          }
+        ]
+      },
+      %{"role" => "tool", "tool_call_id" => "call_1", "content" => "tool result"}
+    ]
+
+    assert {:ok, %{body: body}} =
+             PromptOnSDK.request(%{resolution() | messages: messages}, %{
+               tone: "direct",
+               input: "step",
+               history: history
+             })
+
+    assert body["messages"] == [
+             %{"role" => "system", "content" => "Tone direct."},
+             Enum.at(history, 0),
+             Enum.at(history, 1),
+             %{"role" => "user", "content" => "Next step"}
+           ]
+  end
+
+  test "runtime-inserted chat history rejects unsupported roles" do
+    messages = [%{"type" => "slot", "name" => "history"}]
+
+    assert {:error, {:render, {:invalid_message_slot, "history"}}} =
+             PromptOnSDK.request(%{resolution() | messages: messages}, %{
+               history: [%{"role" => "critic", "content" => "not a provider role"}]
+             })
+  end
+
+  test "raw chat requests still require slots but do not render static or inserted content" do
+    messages = [
+      %{"role" => "system", "content" => "{{ raw }}"},
+      %{"type" => "slot", "name" => "history"}
+    ]
+
+    assert {:error, {:missing_variable, "history"}} =
+             PromptOnSDK.request(%{resolution() | engine: :raw, messages: messages}, %{})
+
+    assert {:ok, %{body: body}} =
+             PromptOnSDK.request(%{resolution() | engine: :raw, messages: messages}, %{
+               history: [%{"role" => "assistant", "content" => "{{ inserted_raw }}"}]
+             })
+
+    assert body["messages"] == [
+             %{"role" => "system", "content" => "{{ raw }}"},
+             %{"role" => "assistant", "content" => "{{ inserted_raw }}"}
+           ]
+  end
+
   test "OpenAI and Groq use explicit paths without OpenRouter fields" do
     for {provider, path} <- [openai: "/v1/chat/completions", groq: "/openai/v1/chat/completions"] do
       assert {:ok, %{path: ^path, body: body}} =
@@ -302,11 +474,17 @@ defmodule PromptOnSDK.RequestTest do
           nil,
           [],
           [%{content: "missing role"}],
-          [%{role: "user", content: %{bad: "shape"}}]
+          [%{role: "invented", content: "bad"}]
         ] do
       assert {:error, :invalid_messages} =
                PromptOnSDK.request(%{resolution() | messages: messages}, %{})
     end
+
+    assert {:error, {:missing_variable, "history"}} =
+             PromptOnSDK.request(
+               %{resolution() | messages: [%{"type" => "slot", "name" => "history"}]},
+               %{}
+             )
 
     assert {:error, :invalid_variables} = PromptOnSDK.request(resolution(), [])
   end
@@ -377,6 +555,65 @@ defmodule PromptOnSDK.RequestTest do
     assert r.messages == nil
     assert r == r |> Prompt.from_resolution() |> Prompt.to_resolution()
     assert {:ok, _} = PromptOnSDK.request(r, %{input: "hello", team: "Support"})
+  end
+
+  test "schema v7 preserves tool definitions through resolution and Prompt round trip" do
+    doc =
+      document("chat")
+      |> Map.put("schema_version", 7)
+      |> put_in(["prompt_versions", "v", "tools"], %{
+        "definitions" => [
+          %{
+            "type" => "function",
+            "function" => %{"name" => "lookup", "parameters" => %{"type" => "object"}},
+            "output_schema" => %{"type" => "object"}
+          }
+        ],
+        "tool_choice" => "auto"
+      })
+
+    assert {:ok, decoded, []} = PromptDocument.decode(doc)
+    assert decoded.schema_version == 7
+    assert decoded.prompt_versions["v"].tools["tool_choice"] == "auto"
+    assert {:ok, r} = Resolver.resolve(decoded, "route")
+    assert r.tools == decoded.prompt_versions["v"].tools
+    assert r == r |> Prompt.from_resolution() |> Prompt.to_resolution()
+
+    assert {:ok, %{body: body}} = PromptOnSDK.request(r, %{input: "hi"})
+
+    assert body["tools"] == [
+             %{
+               "type" => "function",
+               "function" => %{"name" => "lookup", "parameters" => %{"type" => "object"}}
+             }
+           ]
+
+    assert body["tool_choice"] == "auto"
+  end
+
+  test "test stubs preserve canonical tools for chat requests" do
+    PromptOnSDK.Test.stub("tool_chat", %{
+      model: "openai/gpt-5-mini",
+      api: :chat_completions,
+      request_path: "/api/v1/chat/completions",
+      messages: [%{"role" => "user", "content" => "{{ input }}"}],
+      tools: %{
+        "definitions" => [
+          %{
+            "type" => "function",
+            "function" => %{"name" => "lookup"},
+            "output_schema" => %{"type" => "object"}
+          }
+        ],
+        "tool_choice" => "auto"
+      }
+    })
+
+    assert {:ok, prompt} = PromptOnSDK.prompt("tool_chat")
+    assert {:ok, %{body: body}} = PromptOnSDK.request(prompt, %{input: "hi"})
+
+    assert body["tools"] == [%{"type" => "function", "function" => %{"name" => "lookup"}}]
+    assert body["tool_choice"] == "auto"
   end
 
   test "legacy OpenRouter Decisions path remains accepted for pinned snapshots" do

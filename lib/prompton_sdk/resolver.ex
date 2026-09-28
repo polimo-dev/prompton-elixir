@@ -89,6 +89,7 @@ defmodule PromptOnSDK.Resolver do
       provider_options:
         Params.merge(model && model.provider_options, deployment.provider_options),
       messages: template_messages(kind, prompt_version),
+      tools: template_tools(prompt_version),
       text_template: template_text(kind, prompt_version),
       input_schema: prompt.input_schema,
       source: Keyword.get(opts, :source, :remote),
@@ -105,6 +106,9 @@ defmodule PromptOnSDK.Resolver do
 
   defp template_messages(:chat, %{messages: messages}) when is_list(messages), do: messages
   defp template_messages(_, _), do: nil
+
+  defp template_tools(%{tools: tools}) when is_map(tools), do: tools
+  defp template_tools(_), do: nil
 
   defp template_text(:text, %{text_template: text}) when is_binary(text), do: text
   defp template_text(_, _), do: nil

@@ -12,7 +12,7 @@ defmodule PromptOnSDK.Client do
     `body` is the **raw bytes** (written to the disk cache as is); if a map is returned, the SDK
     re-serializes it. `opts[:receive_timeout]` is the timeout for this request only (the boot
     fetch uses 3 seconds).
-  * `post_logs/2`, `post_feedback/2`:
+  * `post_logs/2`, `post_feedback/2`, `post_events/2`:
     `{:ok, %{status: integer, body: map | binary, headers: map}}` | `{:error, term}`.
     `headers` is a map with lowercase keys (see `"retry-after"`).
   """
@@ -39,4 +39,5 @@ defmodule PromptOnSDK.Client do
               {:ok, prompt_document_response()} | {:error, term()}
   @callback post_logs(Config.t(), [map()]) :: {:ok, post_response()} | {:error, term()}
   @callback post_feedback(Config.t(), [map()]) :: {:ok, post_response()} | {:error, term()}
+  @callback post_events(Config.t(), [map()]) :: {:ok, post_response()} | {:error, term()}
 end
