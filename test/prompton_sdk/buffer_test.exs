@@ -15,6 +15,15 @@ defmodule PromptOnSDK.BufferTest do
       "started_at" => "2026-08-18T00:00:00Z"
     }
 
+  defp event(i),
+    do: %{
+      "event_id" => "evt-#{i}",
+      "trace_id" => "trace-#{i}",
+      "event_kind" => "tool_attempt",
+      "status" => "ok",
+      "observed_at" => "2026-08-18T00:00:00Z"
+    }
+
   # Starts only the Buffer (no snapshot poller): Config + TaskSupervisor + Buffer, no Supervisor.
   defp start_buffer(opts \\ []) do
     log =
@@ -349,6 +358,46 @@ defmodule PromptOnSDK.BufferTest do
     assert Buffer.stats().logs.count == 0
   end
 
+  test "events lane reads nested event rejection evidence and telemetry counts" do
+    attach_telemetry([@flush])
+    FakeClient.notify(self())
+
+    FakeClient.set(:post_events, fn items ->
+      {:ok,
+       %{
+         status: 202,
+         body: %{
+           "accepted" => 0,
+           "duplicates" => 0,
+           "rejected" => [],
+           "events" => %{
+             "accepted" => length(items) - 1,
+             "duplicates" => 0,
+             "rejected" => [%{"event_id" => "evt-1", "reason" => "bad evidence"}]
+           }
+         },
+         headers: %{}
+       }}
+    end)
+
+    start_buffer(flush_size: 2, flush_interval: 60_000)
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        Buffer.enqueue(:events, event(1))
+        Buffer.enqueue(:events, event(2))
+
+        assert_receive {:fake_client, :post_events, [[%{"event_id" => "evt-1"}, _]]}, 500
+
+        assert_receive {:telemetry, @flush, %{count: 2, accepted: 1, duplicates: 0, rejected: 1},
+                        %{lane: :events, status: 202}},
+                       500
+      end)
+
+    assert log =~ "events: 1 item(s) rejected"
+    assert Buffer.stats().events.count == 0
+  end
+
   test "max_buffer drops the oldest items with dropped telemetry and a rate-limited warning" do
     attach_telemetry([@dropped])
     FakeClient.set(:post_logs, fn _ -> ok_202() end)
@@ -377,20 +426,62 @@ defmodule PromptOnSDK.BufferTest do
     assert Buffer.stats().logs.count == 0
   end
 
+  test "flush drains pending events lane synchronously" do
+    FakeClient.notify(self())
+
+    FakeClient.set(:post_events, fn events ->
+      {:ok,
+       %{
+         status: 202,
+         body: %{
+           "accepted" => 0,
+           "duplicates" => 0,
+           "rejected" => [],
+           "events" => %{"accepted" => length(events), "duplicates" => 0, "rejected" => []}
+         },
+         headers: %{}
+       }}
+    end)
+
+    start_buffer(flush_size: 100, flush_interval: 60_000)
+    Buffer.enqueue(:events, event(1))
+    _ = Buffer.stats()
+
+    assert {:ok, 0} = Buffer.flush()
+    assert_received {:fake_client, :post_events, [[%{"event_id" => "evt-1"}]]}
+  end
+
   test "terminate drains synchronously" do
     FakeClient.notify(self())
     FakeClient.set(:post_logs, fn _ -> ok_202() end)
     FakeClient.set(:post_feedback, fn _ -> ok_202() end)
+
+    FakeClient.set(:post_events, fn events ->
+      {:ok,
+       %{
+         status: 202,
+         body: %{
+           "accepted" => 0,
+           "duplicates" => 0,
+           "rejected" => [],
+           "events" => %{"accepted" => length(events), "duplicates" => 0, "rejected" => []}
+         },
+         headers: %{}
+       }}
+    end)
+
     start_buffer(flush_size: 100, flush_interval: 60_000)
 
     for i <- 1..3, do: Buffer.enqueue(:logs, gen(i))
     Buffer.enqueue(:feedback, %{"log_id" => "gen-1", "kind" => "thumbs", "value" => 1})
+    Buffer.enqueue(:events, event(1))
     # Guarantees the enqueues have been processed
     _ = Buffer.stats()
 
     :ok = stop_supervised!(Buffer)
     assert_received {:fake_client, :post_logs, [[_, _, _]]}
     assert_received {:fake_client, :post_feedback, [[%{"kind" => "thumbs"}]]}
+    assert_received {:fake_client, :post_events, [[%{"event_id" => "evt-1"}]]}
   end
 
   test "feedback lane posts to /feedback" do

@@ -410,8 +410,7 @@ defmodule PromptOnSDK.Buffer do
 
   defp handle_result(state, lane, items, bytes, {:ok, %{status: status} = resp})
        when status in 200..299 do
-    body = Map.get(resp, :body)
-    body = if is_map(body), do: body, else: %{}
+    body = response_stats_body(lane, Map.get(resp, :body))
     rejected = List.wrap(body["rejected"])
 
     unless rejected == [] do
@@ -539,6 +538,10 @@ defmodule PromptOnSDK.Buffer do
     |> pause(retry_ms)
   end
 
+  defp response_stats_body(:events, %{"events" => events}) when is_map(events), do: events
+  defp response_stats_body(_lane, body) when is_map(body), do: body
+  defp response_stats_body(_lane, _body), do: %{}
+
   defp pause(state, ms) do
     %{state | paused_until: System.monotonic_time(:millisecond) + ms}
   end
@@ -597,7 +600,7 @@ defmodule PromptOnSDK.Buffer do
   end
 
   defp drain_lanes(state, deadline) do
-    Enum.reduce([:logs, :feedback], state, &drain_lane(&2, &1, deadline))
+    Enum.reduce([:logs, :feedback, :events], state, &drain_lane(&2, &1, deadline))
   end
 
   defp drain_lane(state, lane_name, deadline) do

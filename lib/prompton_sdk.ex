@@ -433,7 +433,12 @@ defmodule PromptOnSDK do
   defp accepted_events_response(events) do
     %{
       status: 202,
-      body: %{"accepted" => length(events), "duplicates" => 0, "rejected" => []},
+      body: %{
+        "accepted" => 0,
+        "duplicates" => 0,
+        "rejected" => [],
+        "events" => %{"accepted" => length(events), "duplicates" => 0, "rejected" => []}
+      },
       headers: %{}
     }
   end

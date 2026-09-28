@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.2
+
+- Read trace-event `/logs` acknowledgements from the nested `events` response, including rejected event evidence and telemetry counts, matching the server contract.
+- Make test-mode `log_events(sync: true)` return the same nested acknowledgement shape as live mode.
+- Drain the trace-event lane during explicit flush and supervisor shutdown.
+
 ## 0.4.1
 
 - Patch release aligning all SDKs on the current `/prompts` runtime API and `prompt_key` log contract. Elixir already used the canonical paths and fields; this release keeps version parity.

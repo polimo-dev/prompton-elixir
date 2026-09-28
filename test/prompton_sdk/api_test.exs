@@ -551,7 +551,21 @@ defmodule PromptOnSDK.APITest do
                )
     end
 
-    test "log_events/2 sync posts events and preserves rejected evidence" do
+    test "log_events/2 sync in test mode uses the real nested events ack shape" do
+      assert {:ok, %{status: 202, body: body}} =
+               PromptOnSDK.log_events(
+                 %{trace_id: "trace-test", event_kind: "completion", status: "ok"},
+                 sync: true
+               )
+
+      assert body["accepted"] == 0
+      assert body["duplicates"] == 0
+      assert body["rejected"] == []
+      assert body["events"] == %{"accepted" => 1, "duplicates" => 0, "rejected" => []}
+      assert_receive {:prompton_events, [%{"trace_id" => "trace-test"}]}
+    end
+
+    test "log_events/2 sync posts events and preserves nested rejected evidence" do
       Application.put_env(:prompton_sdk, :mode, :live)
       Application.put_env(:prompton_sdk, :base_url, "http://prompton.test/api/v1")
       Application.put_env(:prompton_sdk, :client, FakeClient)
@@ -566,7 +580,12 @@ defmodule PromptOnSDK.APITest do
            body: %{
              "accepted" => 0,
              "duplicates" => 0,
-             "rejected" => [%{"event_id" => "evt-1", "reason" => "bad evidence"}]
+             "rejected" => [],
+             "events" => %{
+               "accepted" => 0,
+               "duplicates" => 0,
+               "rejected" => [%{"event_id" => "evt-1", "reason" => "bad evidence"}]
+             }
            },
            headers: %{}
          }}
@@ -584,7 +603,12 @@ defmodule PromptOnSDK.APITest do
                  timeout: 1234
                )
 
-      assert body["rejected"] == [%{"event_id" => "evt-1", "reason" => "bad evidence"}]
+      assert body["rejected"] == []
+
+      assert body["events"]["rejected"] == [
+               %{"event_id" => "evt-1", "reason" => "bad evidence"}
+             ]
+
       assert_receive {:fake_client, :post_events, [[%{"event_id" => "evt-1"} = event]]}
       assert event["observed_at"]
     end
