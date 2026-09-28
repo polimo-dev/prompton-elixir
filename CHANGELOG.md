@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1
+
+- Patch release aligning all SDKs on the current `/prompts` runtime API and `prompt_key` log contract. Elixir already used the canonical paths and fields; this release keeps version parity.
+
 ## 0.4.0
 
 - Read schema v7 prompt documents with chat tool definitions and dynamic message slots.
