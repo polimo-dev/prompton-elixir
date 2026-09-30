@@ -150,6 +150,19 @@ defmodule PromptOnSDK.PromptDocumentTest do
       refute Map.has_key?(data.deployments, "chat_response")
     end
 
+    test "a revision label with a trailing newline is rejected" do
+      map =
+        put_in(
+          Fixtures.snapshot(),
+          ["deployments", "chat_response", "revision"],
+          "v2026.09.30-2\n"
+        )
+
+      assert {:ok, data, warnings} = PromptDocument.decode(map)
+      assert {:invalid_revision, "v2026.09.30-2\n"} in warnings
+      assert data.deployments["chat_response"].revision == nil
+    end
+
     test "broken template_pins are warned about" do
       map = put_in(Fixtures.snapshot(), ["deployments", "chat_response", "template_pins"], "nope")
 

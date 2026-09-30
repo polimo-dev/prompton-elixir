@@ -19,7 +19,7 @@ defmodule PromptOnSDK.PromptDocument do
   @variable_types ~w(string number boolean list map)
   @providers ~w(openrouter groq openai anthropic google other)
   @model_statuses ~w(active deprecated)
-  @revision_pattern ~r/^v\d{4}\.\d{2}\.\d{2}-[1-9]\d*$/
+  @revision_pattern ~r/\Av\d{4}\.\d{2}\.\d{2}-[1-9]\d*\z/
   @known_values @kinds ++
                   @apis ++
                   @engines ++ @payload_modes ++ @variable_types ++ @providers ++ @model_statuses
