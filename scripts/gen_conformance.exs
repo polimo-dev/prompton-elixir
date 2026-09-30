@@ -616,7 +616,7 @@ defmodule GenConformance do
       "deployments" => %{
         "greeting" => %{
           "id" => @dep_greeting_prod,
-          "revision" => 3,
+          "revision" => "v2026.09.30-3",
           "model_id" => @model_chat,
           "params" => %{"temperature" => 0.2},
           "provider_options" => %{"allow_fallbacks" => true, "sort" => nil},
@@ -624,7 +624,7 @@ defmodule GenConformance do
         },
         "summarize" => %{
           "id" => @dep_summarize_prod,
-          "revision" => 1,
+          "revision" => "v2026.09.30-1",
           "model_id" => @model_chat,
           "params" => %{},
           "provider_options" => %{},
@@ -632,7 +632,7 @@ defmodule GenConformance do
         },
         "embed" => %{
           "id" => @dep_embed_prod,
-          "revision" => 2,
+          "revision" => "v2026.09.30-2",
           "model_id" => @model_embed,
           "params" => %{"dimensions" => 256},
           "provider_options" => %{},
@@ -640,7 +640,7 @@ defmodule GenConformance do
         },
         "tool_chat" => %{
           "id" => @dep_tool_chat_prod,
-          "revision" => 1,
+          "revision" => "v2026.09.30-1",
           "model_id" => @model_chat,
           "params" => %{},
           "provider_options" => %{},
@@ -749,7 +749,7 @@ defmodule GenConformance do
       "deployments" => %{
         "greeting" => %{
           "id" => @dep_greeting_stg,
-          "revision" => 7,
+          "revision" => "v2026.09.30-7",
           "model_id" => @model_chat,
           "params" => %{"temperature" => 0.9, "top_p" => 0.8},
           "provider_options" => %{},
@@ -801,7 +801,7 @@ defmodule GenConformance do
       "deployments" => %{
         "greeting" => %{
           "id" => @dep_broken,
-          "revision" => 1,
+          "revision" => "v2026.09.30-1",
           "model_id" => @model_absent,
           "params" => %{},
           "provider_options" => %{"only" => ["OpenAI"]},
@@ -1273,7 +1273,7 @@ defmodule GenConformance do
       kind: :chat,
       template: "default",
       deployment_id: @dep_greeting_prod,
-      deployment_revision: 3,
+      deployment_revision: "v2026.09.30-3",
       prompt_version_id: @pv_greeting_default,
       prompt_version_number: 2,
       engine: :liquid,
@@ -1290,7 +1290,7 @@ defmodule GenConformance do
       kind: :embedding,
       template: nil,
       deployment_id: @dep_embed_prod,
-      deployment_revision: 2,
+      deployment_revision: "v2026.09.30-2",
       model_id: @model_embed,
       model: "openai/text-embedding-3-small",
       provider: :openrouter,
@@ -1500,7 +1500,7 @@ defmodule GenConformance do
       "status" => "ok",
       "started_at" => "2026-09-04T09:00:00.000000Z",
       "deployment_id" => @dep_summarize_prod,
-      "deployment_revision" => 1,
+      "deployment_revision" => "v2026.09.30-1",
       "template" => "default",
       "prompt_version_id" => @pv_summarize,
       "model_id" => @model_chat,

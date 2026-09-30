@@ -14,7 +14,7 @@ defmodule PromptOnSDK.Resolution do
           kind: :chat | :decision | :text | :embedding,
           template: String.t() | nil,
           deployment_id: String.t() | nil,
-          deployment_revision: non_neg_integer() | nil,
+          deployment_revision: String.t() | nil,
           prompt_version_id: String.t() | nil,
           prompt_version_number: non_neg_integer() | nil,
           engine: :liquid | :raw | nil,

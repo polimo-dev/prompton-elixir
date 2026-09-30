@@ -22,7 +22,7 @@ defmodule PromptOnSDK.ResolverTest do
       assert r.prompt_version_id == Fixtures.id(:pv_en)
       assert r.prompt_version_number == 2
       assert r.deployment_id == Fixtures.id(:d_diary)
-      assert r.deployment_revision == 4
+      assert r.deployment_revision == "v2026.09.30-4"
 
       assert [%{role: "system", content: "You write diaries from voice transcriptions."} | _] =
                r.messages

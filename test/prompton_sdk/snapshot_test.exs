@@ -60,7 +60,7 @@ defmodule PromptOnSDK.SnapshotTest do
       "deployments" => %{
         key => %{
           "id" => "deployment-#{key}",
-          "revision" => 1,
+          "revision" => "v2026.09.30-1",
           "model_id" => "shared-model",
           "params" => %{},
           "provider_options" => %{},
@@ -116,7 +116,7 @@ defmodule PromptOnSDK.SnapshotTest do
         "route" => %{
           "id" => "d",
           "model_id" => "m",
-          "revision" => 2,
+          "revision" => "v2026.09.30-2",
           "api" => "decisions",
           "request_path" => request_path,
           "template_pins" => %{"default" => "v"}

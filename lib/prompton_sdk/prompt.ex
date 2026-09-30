@@ -28,7 +28,7 @@ defmodule PromptOnSDK.Prompt do
           decision: map() | nil,
           params: map(),
           provider_options: map(),
-          deployment: %{id: String.t() | nil, revision: non_neg_integer() | nil},
+          deployment: %{id: String.t() | nil, revision: String.t() | nil},
           template: String.t() | nil,
           template_names: [String.t()],
           prompt_version: %{id: String.t() | nil, number: non_neg_integer() | nil} | nil,

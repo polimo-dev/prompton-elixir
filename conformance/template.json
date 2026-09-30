@@ -894,7 +894,7 @@
   },
   "format_version": 1,
   "generated_from": {
-    "commit": "7a7b6892b1af29bcf6a8add836911a6fbdc49770",
+    "commit": "b8abd0194cb5fadef445ca6fbc1fba72a819b83f",
     "language": "elixir",
     "repo": "https://github.com/polimo-dev/prompton-elixir",
     "sdk": "prompton_sdk",

@@ -19,6 +19,7 @@ defmodule PromptOnSDK.PromptDocument do
   @variable_types ~w(string number boolean list map)
   @providers ~w(openrouter groq openai anthropic google other)
   @model_statuses ~w(active deprecated)
+  @revision_pattern ~r/^v\d{4}\.\d{2}\.\d{2}-[1-9]\d*$/
   @known_values @kinds ++
                   @apis ++
                   @engines ++ @payload_modes ++ @variable_types ++ @providers ++ @model_statuses
@@ -39,7 +40,7 @@ defmodule PromptOnSDK.PromptDocument do
   @type deployment :: %{
           id: String.t() | nil,
           prompt_key: String.t(),
-          revision: integer() | nil,
+          revision: String.t() | nil,
           model_id: String.t() | nil,
           api: :chat_completions | :decisions | nil,
           request_path: String.t() | nil,
@@ -311,15 +312,27 @@ defmodule PromptOnSDK.PromptDocument do
     {%{
        id: to_str(get(raw, "id")),
        prompt_key: to_str(get(raw, "prompt_key")) || key,
-       revision: to_int(get(raw, "revision"), nil),
+       revision: to_revision(get(raw, "revision")),
        model_id: to_str(get(raw, "model_id")),
        api: api,
        request_path: if(is_binary(request_path), do: request_path),
        params: to_string_key_map(get(raw, "params")),
        provider_options: to_string_key_map(get(raw, "provider_options")),
        template_pins: pins
-     }, warnings}
+     }, revision_warnings(get(raw, "revision"), key, warnings)}
   end
+
+  defp to_revision(nil), do: nil
+  defp to_revision(value) when is_binary(value), do: if(value =~ @revision_pattern, do: value)
+  defp to_revision(_value), do: nil
+
+  defp revision_warnings(nil, _key, warnings), do: warnings
+
+  defp revision_warnings(value, _key, warnings) when is_binary(value) do
+    if value =~ @revision_pattern, do: warnings, else: [{:invalid_revision, value} | warnings]
+  end
+
+  defp revision_warnings(value, key, warnings), do: [{:invalid_revision, {key, value}} | warnings]
 
   defp decode_template_pins(nil, _key, warnings), do: {%{}, warnings}
 

@@ -53,7 +53,7 @@ defmodule PromptOnSDK.RequestTest do
         "route" => %{
           "id" => "d",
           "model_id" => "m",
-          "revision" => 2,
+          "revision" => "v2026.09.30-2",
           "api" => if(kind == "chat", do: "chat_completions", else: "decisions"),
           "request_path" =>
             if(kind == "chat", do: "/api/v1/chat/completions", else: "/api/v1/systemone"),

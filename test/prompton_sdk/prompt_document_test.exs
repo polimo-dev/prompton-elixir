@@ -25,7 +25,7 @@ defmodule PromptOnSDK.PromptDocumentTest do
 
       assert deployment.id == Fixtures.id(:d_diary)
       assert deployment.prompt_key == "diary_generation"
-      assert deployment.revision == 4
+      assert deployment.revision == "v2026.09.30-4"
       assert deployment.model_id == Fixtures.id(:m_sonnet4)
       assert deployment.params == %{"temperature" => 0.4}
       assert deployment.provider_options == %{"allow_fallbacks" => false}
@@ -63,7 +63,12 @@ defmodule PromptOnSDK.PromptDocumentTest do
         environment: "staging",
         prompts: %{"greet" => %{id: "u1", kind: "chat"}},
         deployments: %{
-          "greet" => %{id: "d1", revision: 1, model_id: "m1", template_pins: %{"default" => "p1"}}
+          "greet" => %{
+            id: "d1",
+            revision: "v2026.09.30-1",
+            model_id: "m1",
+            template_pins: %{"default" => "p1"}
+          }
         },
         prompt_versions: %{"p1" => %{id: "p1", messages: [%{role: "system", content: "hi"}]}},
         models: %{"m1" => %{id: "m1", model_id: "openai/gpt-5-mini"}}
@@ -141,7 +146,7 @@ defmodule PromptOnSDK.PromptDocumentTest do
 
       assert {:ok, data, warnings} = PromptDocument.decode(map)
       assert {:invalid_deployment, {"chat_response", "nope"}} in warnings
-      assert data.deployments["diary_generation"].revision == 4
+      assert data.deployments["diary_generation"].revision == "v2026.09.30-4"
       refute Map.has_key?(data.deployments, "chat_response")
     end
 

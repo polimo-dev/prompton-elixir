@@ -125,7 +125,7 @@ Append these new voice transcriptions:
       "deployments" => %{
         "diary_generation" => %{
           "id" => id(:d_diary),
-          "revision" => 4,
+          "revision" => "v2026.09.30-4",
           "model_id" => id(:m_sonnet4),
           "params" => %{"temperature" => 0.4},
           "provider_options" => %{"allow_fallbacks" => false},
@@ -133,7 +133,7 @@ Append these new voice transcriptions:
         },
         "chat_response" => %{
           "id" => id(:d_chat),
-          "revision" => 2,
+          "revision" => "v2026.09.30-2",
           "model_id" => id(:m_gpt5_mini),
           "params" => %{"max_tokens" => 1024},
           "provider_options" => %{},
@@ -141,7 +141,7 @@ Append these new voice transcriptions:
         },
         "voice_transcription" => %{
           "id" => id(:d_stt),
-          "revision" => 1,
+          "revision" => "v2026.09.30-1",
           "model_id" => id(:m_whisper),
           "params" => %{},
           "provider_options" => %{},
@@ -149,7 +149,7 @@ Append these new voice transcriptions:
         },
         "diary_embedding" => %{
           "id" => id(:d_embed),
-          "revision" => 1,
+          "revision" => "v2026.09.30-1",
           "model_id" => id(:m_embed),
           "params" => %{},
           "provider_options" => %{},

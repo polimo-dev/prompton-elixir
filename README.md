@@ -289,7 +289,7 @@ template name**:
 ```json
 "deployments": {
   "support_reply": {
-    "id": "…", "revision": 7,
+    "id": "…", "revision": "v2026.09.30-7",
     "model_id": "…", "params": {"temperature": 0.3}, "provider_options": {"only": ["OpenAI"]},
     "template_pins": {"default": "<prompt version id>", "ko": "<prompt version id>"}
   }

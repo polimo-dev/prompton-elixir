@@ -192,7 +192,7 @@ defmodule PromptOnSDK.APITest do
 
       assert gen["prompt_key"] == "diary_generation"
       assert gen["deployment_id"] == Fixtures.id(:d_diary)
-      assert gen["deployment_revision"] == 4
+      assert gen["deployment_revision"] == "v2026.09.30-4"
       assert gen["template"] == "ko"
       assert gen["prompt_version_id"] == Fixtures.id(:pv_ko)
       refute Map.has_key?(gen, "target_id")

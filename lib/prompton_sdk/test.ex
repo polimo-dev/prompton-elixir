@@ -187,7 +187,7 @@ defmodule PromptOnSDK.Test do
   defp stub_deployment(key, ids, pins, spec) do
     %{
       "id" => "stub-deployment-#{key}",
-      "revision" => 1,
+      "revision" => "v2026.09.30-1",
       "model_id" => ids.model,
       "api" => Map.get(spec, :api),
       "request_path" => Map.get(spec, :request_path),
