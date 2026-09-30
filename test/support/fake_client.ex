@@ -23,7 +23,8 @@ defmodule PromptOnSDK.FakeClient do
 
   def child_spec(_), do: %{id: __MODULE__, start: {__MODULE__, :start_link, [[]]}}
 
-  def set(name, fun) when name in [:fetch_prompts, :post_logs, :post_feedback, :post_events] do
+  def set(name, fun)
+      when name in [:fetch_prompt, :fetch_prompts, :post_logs, :post_feedback, :post_events] do
     Agent.update(__MODULE__, &put_in(&1, [:handlers, name], fun))
   end
 
@@ -38,6 +39,14 @@ defmodule PromptOnSDK.FakeClient do
   @impl true
   def fetch_prompts(_config, etag, opts \\ []) do
     call(:fetch_prompts, [etag, opts])
+  end
+
+  @impl true
+  def fetch_prompt(_config, prompt_key, etag, opts \\ []) do
+    case Map.get(Agent.get(__MODULE__, & &1.handlers), :fetch_prompt) do
+      nil -> call(:fetch_prompts, [etag, Keyword.put(opts, :prompt_key, prompt_key)])
+      _fun -> call(:fetch_prompt, [prompt_key, etag, opts])
+    end
   end
 
   @impl true

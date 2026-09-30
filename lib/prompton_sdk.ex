@@ -6,7 +6,7 @@ defmodule PromptOnSDK do
 
   * **Pure core** (no processes, no HTTP): `PromptOnSDK.PromptDocument`,
     `PromptOnSDK.Template`, `PromptOnSDK.StopKind`, `PromptOnSDK.Params`.
-  * **Runtime**: `PromptOnSDK.Supervisor` (loader/poller,
+  * **Runtime**: `PromptOnSDK.Supervisor` (local loader / demand fetcher,
     `PromptOnSDK.TaskSupervisor`, the `PromptOnSDK.Buffer` batcher), `PromptOnSDK.Config`,
     `PromptOnSDK.Client` (+ `Client.Req`), `PromptOnSDK.Payload` (payload policy),
     `PromptOnSDK.Prompt` (`messages/3`, `text/3`, `track/3`), `PromptOnSDK.Result`, the
@@ -110,7 +110,8 @@ defmodule PromptOnSDK do
 
   @doc """
   Prompt key -> `%PromptOnSDK.Prompt{}`. `opts`: `template:` (the template name to pick, default
-  `"default"`). The prompt document is read from `:persistent_term`, so no process call is involved.
+  `"default"`). In live mode the SDK may first perform a per-prompt demand config fetch, sharing an
+  in-flight fetch with concurrent callers for the same key.
   """
   @spec prompt(String.t() | atom(), keyword()) ::
           {:ok, Prompt.t()}
@@ -161,18 +162,24 @@ defmodule PromptOnSDK do
 
   defp do_resolve(prompt_key, opts) do
     t0 = System.monotonic_time()
+    key = to_key(prompt_key)
 
     result =
-      case Store.get() do
-        nil ->
-          {:error, :not_ready}
+      with :ok <- Snapshot.ensure_prompt(key) do
+        case Store.get() do
+          nil ->
+            {:error, :not_ready}
 
-        entry ->
-          Resolver.resolve(entry.data, prompt_key,
-            template: opts[:template],
-            source: entry.source,
-            etag: entry.etag
-          )
+          entry ->
+            meta = Store.prompt_meta(entry, key)
+            data = Store.prompt_document(entry, key)
+
+            Resolver.resolve(data, prompt_key,
+              template: opts[:template],
+              source: meta[:source] || entry.source,
+              etag: meta[:etag] || entry.etag
+            )
+        end
       end
 
     emit_resolve(prompt_key, result, t0)
@@ -216,9 +223,13 @@ defmodule PromptOnSDK do
   @spec template_names(String.t() | atom()) ::
           {:ok, [String.t()]} | {:error, :not_ready | :unknown_prompt}
   def template_names(prompt_key) do
-    case Store.get() do
-      nil -> {:error, :not_ready}
-      entry -> Resolver.template_names(entry.data, prompt_key)
+    key = to_key(prompt_key)
+
+    with :ok <- Snapshot.ensure_prompt(key) do
+      case Store.get() do
+        nil -> {:error, :not_ready}
+        entry -> Resolver.template_names(Store.prompt_document(entry, key), prompt_key)
+      end
     end
   end
 
@@ -477,6 +488,10 @@ defmodule PromptOnSDK do
     end
   end
 
+  defp to_key(key) when is_binary(key), do: key
+  defp to_key(key) when is_atom(key) and not is_nil(key), do: Atom.to_string(key)
+  defp to_key(_), do: nil
+
   defp warn_no_buffer(lane) do
     now = System.monotonic_time(:millisecond)
     last = :persistent_term.get(@no_buffer_warn_key, nil)
@@ -531,9 +546,16 @@ defmodule PromptOnSDK do
   def prompt_document_info, do: Snapshot.info()
 
   @doc """
-  Synchronous reload of the prompt document. `:live` fetches from the remote; `:offline` reloads
-  from file.
+  Synchronous local reload in `:offline`, a no-op in `:test`, and a no-bulk no-op in `:live`.
+  Runtime remote config refreshes are per prompt key; use `refresh_prompt_document/1`.
   """
   @spec refresh_prompt_document() :: :ok | {:error, term()}
   def refresh_prompt_document, do: Snapshot.refresh_prompt_document()
+
+  @doc """
+  Demand-refresh one prompt key, subject to the same 10-second per-key attempt gate and 1-second
+  fetch budget as `prompt/2`.
+  """
+  @spec refresh_prompt_document(String.t() | atom()) :: :ok | {:error, term()}
+  def refresh_prompt_document(prompt_key), do: Snapshot.refresh_prompt_document(prompt_key)
 end

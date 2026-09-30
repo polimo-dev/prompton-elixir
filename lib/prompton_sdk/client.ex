@@ -7,11 +7,13 @@ defmodule PromptOnSDK.Client do
   Every callback takes a `PromptOnSDK.Config.t()` as its first argument (so implementations can be
   stateless). Return values:
 
-  * `fetch_prompts/3`: `{:ok, %{status: 200, body: binary | map, etag, last_modified}}` |
+  * `fetch_prompt/4`: `GET /prompts/:key`, returning
+    `{:ok, %{status: 200, body: binary | map, etag, last_modified}}` |
     `{:ok, %{status: 304}}` | `{:ok, %{status: other, body: term}}` | `{:error, term}`.
     `body` is the **raw bytes** (written to the disk cache as is); if a map is returned, the SDK
-    re-serializes it. `opts[:receive_timeout]` is the timeout for this request only (the boot
-    fetch uses 3 seconds).
+    re-serializes it. `opts[:receive_timeout]` is the timeout for this request only.
+  * `fetch_prompts/3`: legacy full-document fetch used by explicit export/bundle tooling. Runtime
+    prompt resolution does not fall back to it.
   * `post_logs/2`, `post_feedback/2`, `post_events/2`:
     `{:ok, %{status: integer, body: map | binary, headers: map}}` | `{:error, term}`.
     `headers` is a map with lowercase keys (see `"retry-after"`).
@@ -37,7 +39,16 @@ defmodule PromptOnSDK.Client do
 
   @callback fetch_prompts(Config.t(), etag :: String.t() | nil, opts :: keyword()) ::
               {:ok, prompt_document_response()} | {:error, term()}
+  @callback fetch_prompt(
+              Config.t(),
+              prompt_key :: String.t(),
+              etag :: String.t() | nil,
+              opts :: keyword()
+            ) ::
+              {:ok, prompt_document_response()} | {:error, term()}
   @callback post_logs(Config.t(), [map()]) :: {:ok, post_response()} | {:error, term()}
   @callback post_feedback(Config.t(), [map()]) :: {:ok, post_response()} | {:error, term()}
   @callback post_events(Config.t(), [map()]) :: {:ok, post_response()} | {:error, term()}
+
+  @optional_callbacks fetch_prompt: 4
 end

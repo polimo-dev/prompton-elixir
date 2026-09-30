@@ -4,13 +4,12 @@ defmodule PromptOnSDK.Supervisor do
   Repo/PubSub, before Oban/Endpoint).
 
       PromptOnSDK.Supervisor (rest_for_one)
-        ├─ PromptOnSDK.Snapshot        # load/poll → :persistent_term
-        ├─ PromptOnSDK.TaskSupervisor  # Buffer send tasks
+        ├─ PromptOnSDK.TaskSupervisor  # demand fetch and Buffer send tasks
+        ├─ PromptOnSDK.Snapshot        # local load + per-prompt demand fetch → :persistent_term
         └─ PromptOnSDK.Buffer          # log batcher (shutdown 10s, drains in terminate)
 
-  `rest_for_one`: if Snapshot dies, TaskSupervisor and Buffer are restarted too (guarantees the
-  configuration is reloaded). Shutdown runs in reverse order, so TaskSupervisor stays alive while
-  Buffer drains.
+  `rest_for_one`: if Snapshot dies, Buffer is restarted too (guarantees the configuration is
+  reloaded). Shutdown runs in reverse order, so TaskSupervisor stays alive while Buffer drains.
 
   `init/1` stores the result of `PromptOnSDK.Config.load/1` in `:persistent_term`, so `opts`
   override the app env.
@@ -31,8 +30,8 @@ defmodule PromptOnSDK.Supervisor do
     Config.put(config)
 
     children = [
-      {PromptOnSDK.Snapshot, config},
       {Task.Supervisor, name: PromptOnSDK.TaskSupervisor},
+      {PromptOnSDK.Snapshot, config},
       {PromptOnSDK.Buffer, config}
     ]
 

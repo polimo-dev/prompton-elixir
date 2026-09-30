@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.0
+
+- Change runtime prompt config loading to demand-driven per-prompt fetches. Startup and idle periods
+  load only disk/bundle fallbacks and do not poll PromptOn.
+- Fetch `GET /prompts/:key?environment=...` on prompt resolution when that key has no fresh cache,
+  with a fixed 10-second freshness window, a separate fixed 10-second attempt gate, same-key
+  single-flight sharing, and independent fetches for different keys.
+- Bound config fetches to 1 second with no HTTP retry, ignore late responses, and fall back to the
+  last valid prompt value even when expired. Cold failures return the existing SDK unresolved state.
+- Add `PromptOnSDK.refresh_prompt_document(key)` for manual per-key refreshes. The no-arg refresh
+  no longer performs a runtime bulk fetch; `mix prompton.export` keeps the explicit full-document
+  export path.
+- Add `PromptOnSDK.Client.fetch_prompt/4` for runtime demand fetches. Custom runtime clients must
+  implement it; `fetch_prompts/3` remains only for explicit full-document export/bundle tooling.
+
 ## 0.4.2
 
 - Read trace-event `/logs` acknowledgements from the nested `events` response, including rejected event evidence and telemetry counts, matching the server contract.

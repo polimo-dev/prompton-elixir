@@ -2,14 +2,13 @@ defmodule PromptOnSDK.Client.Req do
   @moduledoc """
   Default implementation of `PromptOnSDK.Client`, based on `Req`.
 
-  * Bearer auth (`api_key`), `Accept: application/json`, `retry: false` (the retry policy is owned
-    by the loader/Buffer), timeout from `config.http[:receive_timeout]` (default 5 seconds). The
+  * Bearer auth (`api_key`), `Accept: application/json`, `retry: false`, timeout from
+    `config.http[:receive_timeout]` (default 5 seconds). The
     remaining keys of `config.http` (including `plug:`) are passed to Req as they are.
-  * `GET /prompts` appends `?environment=<slug>` (the `environment` setting, default
-    `"production"`), sends `If-None-Match`, and does **not decode the body**
+  * Runtime prompt resolution uses `GET /prompts/:key?environment=<slug>`, sends per-prompt
+    `If-None-Match`, and does **not decode the body**
     (`decode_body: false`): the ETag is a hash of the body bytes, so the raw body is stored in the
-    disk cache unchanged. Keys are per project, so this query is what selects the environment
-    (2026-09-01).
+    SDK cache unchanged. `fetch_prompts/3` remains available for explicit bundle export.
   * `POST /logs?environment=<slug>` sends generation logs as `{"logs": [...]}` and trace
     events as `{"logs": [], "events": [...]}`. `POST /feedback` sends `{"feedback": [...]}` JSON.
   """
@@ -19,17 +18,27 @@ defmodule PromptOnSDK.Client.Req do
   alias PromptOnSDK.Config
 
   @impl true
+  def fetch_prompt(%{} = config, prompt_key, etag, opts \\ []) do
+    get_prompts(config, "/prompts/#{encode_path_segment(prompt_key)}", etag, opts)
+  end
+
+  @impl true
   def fetch_prompts(%{} = config, etag, opts \\ []) do
+    get_prompts(config, "/prompts", etag, opts)
+  end
+
+  defp get_prompts(%{} = config, path, etag, opts) do
     headers = if etag, do: [{"if-none-match", etag}], else: []
 
     req_opts =
       [
-        url: "/prompts",
+        url: path,
         params: [environment: Map.get(config, :environment) || Config.default_environment()],
         headers: headers,
         decode_body: false
       ]
       |> Keyword.merge(Keyword.take(opts, [:receive_timeout, :connect_options]))
+      |> Keyword.put(:retry, false)
 
     case Req.get(base(config), req_opts) do
       {:ok, %Req.Response{status: 200} = resp} ->
@@ -86,10 +95,10 @@ defmodule PromptOnSDK.Client.Req do
     opts =
       [
         base_url: base_url,
-        retry: false,
         headers: [{"accept", "application/json"}, {"user-agent", user_agent()}]
       ]
       |> Keyword.merge(config.http)
+      |> Keyword.put(:retry, false)
 
     opts = if config.api_key, do: Keyword.put(opts, :auth, {:bearer, config.api_key}), else: opts
 
@@ -115,4 +124,10 @@ defmodule PromptOnSDK.Client.Req do
   end
 
   defp user_agent, do: "prompton_sdk/#{PromptOnSDK.version()}"
+
+  defp encode_path_segment(value) do
+    value
+    |> to_string()
+    |> URI.encode(&URI.char_unreserved?/1)
+  end
 end

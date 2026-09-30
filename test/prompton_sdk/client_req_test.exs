@@ -24,7 +24,7 @@ defmodule PromptOnSDK.Client.ReqTest do
 
   defp header(req, name), do: Req.Request.get_header(req, name)
 
-  test "fetch_prompts sends Bearer + If-None-Match, keeps raw body, returns etag/last-modified" do
+  test "fetch_prompt sends Bearer + If-None-Match to the key endpoint and disables retry overrides" do
     test_pid = self()
 
     adapter = fn req ->
@@ -46,12 +46,14 @@ defmodule PromptOnSDK.Client.ReqTest do
               etag: ~s("abc"),
               last_modified: "Mon, 18 Aug 2026 09:12:03 GMT"
             }} =
-             Client.fetch_prompts(config(adapter), ~s("old"), receive_timeout: 3_000)
+             Client.fetch_prompt(config(adapter), "diary/generation", ~s("old"),
+               receive_timeout: 3_000
+             )
 
     assert_received {:req, req}
     # The environment is set by the query, not by the key (2026-09-01)
     assert URI.to_string(req.url) ==
-             "https://prompton.test/api/v1/prompts?environment=production"
+             "https://prompton.test/api/v1/prompts/diary%2Fgeneration?environment=production"
 
     assert req.method == :get
     assert header(req, "authorization") == ["Bearer ptn_production_secret"]
@@ -64,24 +66,41 @@ defmodule PromptOnSDK.Client.ReqTest do
     assert req.options[:decode_body] == false
   end
 
-  test "fetch_prompts 304 and other statuses; transport errors" do
+  test "fetch_prompts remains the explicit full-document export endpoint" do
+    test_pid = self()
+
+    adapter = fn req ->
+      send(test_pid, {:req, req})
+      {req, Req.Response.new(status: 304)}
+    end
+
+    assert {:ok, %{status: 304}} = Client.fetch_prompts(config(adapter), "x", [])
+
+    assert_received {:req, req}
+    assert URI.to_string(req.url) == "https://prompton.test/api/v1/prompts?environment=production"
+  end
+
+  test "fetch_prompt 304 and other statuses; transport errors" do
     assert {:ok, %{status: 304}} =
-             Client.fetch_prompts(
+             Client.fetch_prompt(
                config(fn req -> {req, Req.Response.new(status: 304)} end),
+               "x",
                "x",
                []
              )
 
     assert {:ok, %{status: 401, body: "nope"}} =
-             Client.fetch_prompts(
+             Client.fetch_prompt(
                config(fn req -> {req, Req.Response.new(status: 401, body: "nope")} end),
+               "x",
                nil,
                []
              )
 
     assert {:error, %Req.TransportError{reason: :timeout}} =
-             Client.fetch_prompts(
+             Client.fetch_prompt(
                config(fn req -> {req, %Req.TransportError{reason: :timeout}} end),
+               "x",
                nil,
                []
              )

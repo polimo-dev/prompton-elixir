@@ -24,13 +24,13 @@ Once published, the hex line will be:
 
 ```elixir
 def deps do
-  [{:prompton_sdk, "~> 0.4"}]
+  [{:prompton_sdk, "~> 0.5"}]
 end
 ```
 
 ## Prepared provider requests
 
-SDK 0.4 reads schema v7 documents and returns the deployed API, origin-relative path and rendered
+SDK 0.5 reads schema v7 documents and returns the deployed API, origin-relative path and rendered
 body. Your app supplies the provider origin and credentials and sends the HTTP request:
 
 ```elixir
@@ -117,7 +117,7 @@ config :prompton_sdk,
   api_key: System.fetch_env!("PTN_API_KEY"),          # ptn_<project>_… — a project key
   environment: "production",                               # which environment this app reads (default)
   base_url: "https://prompton.example/api/v1",
-  poll_interval: :timer.seconds(10),                       # ETag polling
+  poll_interval: :timer.seconds(10),                       # legacy option; demand fetch gates are fixed at 10s
   disk_cache: "/var/lib/myapp/prompton_prompts.production.json",     # nil disables (k8s: emptyDir volume)
   bundle: {:file, Application.app_dir(:myapp, "priv/prompton/prompts.production.json")},  # last-resort fallback
   log: [flush_interval: 2_000, flush_size: 100, flush_bytes: 1_000_000, max_buffer: 10_000,
@@ -129,9 +129,9 @@ config :prompton_sdk,
 | key | default | notes |
 |---|---|---|
 | `api_key` | `nil` | `ptn_<project_slug>_…`; without it no remote calls are made |
-| `environment` | `"production"` | sent as `GET /prompts?environment=…` and used as the disk/bundle guard |
+| `environment` | `"production"` | sent as `GET /prompts/:key?environment=…` and used as the disk/bundle guard |
 | `base_url` | `nil` | trailing `/` trimmed |
-| `poll_interval` | 10 s | also the base of the failure backoff (×2 up to 5 min) |
+| `poll_interval` | 10 s | retained for compatibility; runtime prompt config freshness and attempt gates are fixed at 10 s |
 | `disk_cache` | `nil` | atomic tmp→rename; sidecar `<path>.meta.json` holds ETag / Last-Modified |
 | `bundle` | `nil` | `{:file, path}` produced by `mix prompton.export` |
 | `log` | see above | `redact` is `fn log_map -> map`, applied last |
@@ -145,7 +145,7 @@ Add the SDK to your supervision tree after your Repo/PubSub and before Oban / th
 ```elixir
 children = [
   MyApp.Repo,
-  {PromptOnSDK, []},          # PromptOnSDK.Supervisor: loader → TaskSupervisor → Buffer (rest_for_one)
+  {PromptOnSDK, []},          # PromptOnSDK.Supervisor: local loader → demand fetcher → Buffer
   Oban,
   MyAppWeb.Endpoint
 ]
@@ -153,21 +153,30 @@ children = [
 
 Options given here override the application env (`{PromptOnSDK, mode: :offline}`).
 
-## Fallback chain (§7.3)
+## Demand config fetch and fallback (§7.3)
 
 ```
-boot:  init loads disk cache, then bundle (synchronously, if present, valid and same environment)
-       handle_continue fetches GET /prompts (3 s) — boot is never blocked
-         200  → persistent_term + disk cache + sidecar          source: :remote
-         fail → keep disk/bundle, poll in the background        source: :disk | :bundle  (stale telemetry with age)
-         nothing at all → prompt returns {:error, :not_ready} source: :none
-poll:  If-None-Match every poll_interval; 304 = no-op; 200 = swap; failures back off 10 s → 5 min
+boot:      init loads disk cache, then bundle (synchronously, if present, valid and same environment)
+idle:      no remote fetch and no polling timer
+prompt(k): if k has a remotely validated value younger than 10 s, use it
+           otherwise, if no attempt for k started in the last 10 s, fetch
+           GET /prompts/:k?environment=<slug> with k's If-None-Match
+success:   200 swaps only k's cached config; 304 marks k fresh only when a value already exists
+failure:   after 1 s total, transport/HTTP/decode/scope errors keep the last valid value, even expired
+cold fail: if no disk/bundle/remote value for k exists, prompt returns the normal unresolved state
 ```
 
 The disk cache and bundle are refused with a warning when their `environment` differs from the configured
 `environment` (a `staging` app must not boot on a `production` bundle). `PromptOnSDK.prompt_document_info/0` reports
-`%{etag, last_modified, source, fetched_at, stale?, age_seconds}`; `PromptOnSDK.refresh_prompt_document/0`
-re-fetches synchronously.
+`%{etag, last_modified, source, fetched_at, stale?, age_seconds}` for the loaded document. A remote
+failure marks only the requested prompt stale and never deletes the last valid value.
+
+Concurrent callers for the same prompt key share one in-flight fetch and its original 1-second
+deadline. Different prompt keys start independent fetches, so a slow `support_reply` config lookup
+does not block `summary` from resolving. `PromptOnSDK.refresh_prompt_document(key)` runs the same
+manual per-key refresh path and obeys the same 10-second attempt gate. The no-arg
+`PromptOnSDK.refresh_prompt_document/0` reloads local files in offline mode and does not perform a
+runtime bulk fetch in live mode. Use `mix prompton.export` when you explicitly want a full bundle.
 
 ## Usage (Oban worker)
 
@@ -309,9 +318,9 @@ New apps should usually keep one default template per prompt and branch inside t
 | Logged keys | `+ rule_id`, `target_id` | `prompt_key`, `deployment_id`, `deployment_revision`, `template`, `prompt_version_id` |
 
 Everything else is unchanged: `default_params ⊕ deployment params`, `model.provider_options ⊕ deployment
-provider_options`, templates, ETag polling, disk/bundle fallback, monitoring-log envelope. v1/v2 documents (a stale disk
-cache or an old repo bundle) are refused with `{:error, {:unsupported_schema_version, n}}` and the SDK keeps
-polling for a v5 one.
+provider_options`, templates, per-prompt ETags, disk/bundle fallback, monitoring-log envelope. v1/v2 documents (a stale disk
+cache or an old repo bundle) are refused with `{:error, {:unsupported_schema_version, n}}`; the SDK keeps the
+last valid value and tries the requested prompt again after the per-key attempt gate allows it.
 
 ## Logging pipeline
 

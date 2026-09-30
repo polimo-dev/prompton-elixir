@@ -11,9 +11,9 @@ defmodule PromptOnSDK.Config do
   | Key | Default | Description |
   |---|---|---|
   | `api_key` | `nil` | `ptn_<project_slug>_…` format (project key). `nil` means disk/bundle only, no remote calls |
-  | `environment` | `"production"` | Environment slug this app reads. The `GET /prompts?environment=…` query and the disk/bundle guard reference |
+  | `environment` | `"production"` | Environment slug this app reads. The `GET /prompts/:key?environment=…` query and the disk/bundle guard reference |
   | `base_url` | `nil` | `https://prompton.example/api/v1` (trailing `/` removed) |
-  | `poll_interval` | `10_000` | ETag polling interval (ms). Also the minimum for failure backoff |
+  | `poll_interval` | `10_000` | Legacy compatibility setting. Demand config freshness and attempt gates are fixed at 10 seconds |
   | `disk_cache` | `nil` | Prompt document disk cache path. `nil` disables it |
   | `bundle` | `nil` | `{:file, path}`: the last-resort fallback bundle |
   | `log` | below | `flush_interval: 2_000, flush_size: 100, flush_bytes: 1_000_000, max_buffer: 10_000, redact: nil` |
