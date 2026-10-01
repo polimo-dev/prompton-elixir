@@ -285,6 +285,9 @@ defmodule PromptOnSDK.ConformanceTest do
       {:error, {:missing_variable, name}} ->
         %{"error" => "missing_variable", "variable" => name}
 
+      {:error, {:render, reason}} ->
+        %{"error" => "render_error", "message" => render_error_message(reason)}
+
       {:ok, rendered} ->
         {:ok, prompts} = Resolver.template_names(data, prompt)
 
@@ -338,6 +341,9 @@ defmodule PromptOnSDK.ConformanceTest do
   end
 
   defp fill_prompt(_r, _variables), do: {:ok, %{}}
+
+  defp render_error_message(reason) when is_binary(reason), do: reason
+  defp render_error_message(reason), do: inspect(reason)
 
   defp message_map(m) do
     m

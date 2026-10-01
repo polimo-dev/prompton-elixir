@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Retire dynamic message slot expansion. Chat prompts now render only PromptOn-managed messages;
+  applications compose conversation history and the current user turn before calling the provider.
+- Reject legacy `%{"type" => "slot"}` messages with
+  `Message slots are not supported; compose conversation history in app code.`
+
 ## 0.5.0
 
 - Change runtime prompt config loading to demand-driven per-prompt fetches. Startup and idle periods
@@ -27,7 +34,7 @@
 
 ## 0.4.0
 
-- Read schema v7 prompt documents with chat tool definitions and dynamic message slots.
+- Read schema v7 prompt documents with chat tool definitions.
 - Preserve native chat message fields, including tool calls and tool response linkage, during rendering.
 - Prepare Chat provider requests with canonical tools while stripping PromptOn-only tool metadata.
 - Add `PromptOnSDK.log_events/2` for tool-attempt/completion trace events and preserve prepared request messages/tools in generation logs.

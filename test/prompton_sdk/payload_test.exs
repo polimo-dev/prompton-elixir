@@ -266,7 +266,7 @@ defmodule PromptOnSDK.PayloadTest do
         assert_within_server_limits(out, max)
         assert out["input"]["truncated"] == true
         assert out["output"]["truncated"] == true
-        # The first message (the system template slot) always keeps its role
+        # The first message (the system template message) always keeps its role
         assert hd(out["input"]["messages"])["role"] == hd(msgs)["role"]
 
         # Drops happen only in the middle: the last message survives (usually), or the budget ran

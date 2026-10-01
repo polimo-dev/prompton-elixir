@@ -291,10 +291,12 @@ defmodule GenConformance do
   @uc_embed "0198f2a1-0000-7000-8000-00000000c003"
   @uc_draft "0198f2a1-0000-7000-8000-00000000c004"
   @uc_tool_chat "0198f2a1-0000-7000-8000-00000000c005"
+  @uc_legacy_slot "0198f2a1-0000-7000-8000-00000000c006"
   @dep_greeting_prod "0198f2a1-0000-7000-8000-00000000d001"
   @dep_summarize_prod "0198f2a1-0000-7000-8000-00000000d002"
   @dep_embed_prod "0198f2a1-0000-7000-8000-00000000d003"
   @dep_tool_chat_prod "0198f2a1-0000-7000-8000-00000000d004"
+  @dep_legacy_slot_prod "0198f2a1-0000-7000-8000-00000000d005"
   @dep_greeting_stg "0198f2a1-0000-7000-8000-00000000d011"
   @dep_broken "0198f2a1-0000-7000-8000-00000000d021"
   @pv_greeting_default "0198f2a1-0000-7000-8000-00000000a001"
@@ -302,6 +304,7 @@ defmodule GenConformance do
   @pv_summarize "0198f2a1-0000-7000-8000-00000000a003"
   @pv_greeting_stg "0198f2a1-0000-7000-8000-00000000a004"
   @pv_tool_chat "0198f2a1-0000-7000-8000-00000000a005"
+  @pv_legacy_slot "0198f2a1-0000-7000-8000-00000000a006"
   @pv_absent "0198f2a1-0000-7000-8000-0000000000ff"
   @model_chat "0198f2a1-0000-7000-8000-00000000e001"
   @model_embed "0198f2a1-0000-7000-8000-00000000e002"
@@ -309,6 +312,7 @@ defmodule GenConformance do
   @prompt_greeting "0198f2a1-0000-7000-8000-00000000b001"
   @prompt_summarize "0198f2a1-0000-7000-8000-00000000b002"
   @prompt_tool_chat "0198f2a1-0000-7000-8000-00000000b003"
+  @prompt_legacy_slot "0198f2a1-0000-7000-8000-00000000b004"
 
   defp prompt_cases do
     documents = %{
@@ -367,6 +371,14 @@ defmodule GenConformance do
           variables: %{"input" => "continue"},
           note:
             "native chat message fields survive rendering: null content, tool_calls, tool_call_id and array content are not stripped"
+        },
+        %{
+          name: "chat/legacy_message_slot_rejected",
+          ref: "production",
+          prompt: "legacy_slot",
+          variables: %{"history" => [%{"role" => "assistant", "content" => "old turn"}]},
+          note:
+            "message-history slots are retired; apps compose conversation history with rendered PromptOn-managed messages before the provider call"
         },
         %{
           name: "chat/unpinned_prompt_name",
@@ -450,7 +462,8 @@ defmodule GenConformance do
         "unknown_template" =>
           "the deployment pins no template version under that name (no fallback to \"default\")",
         "missing_variable" =>
-          "prompt selection succeeded but rendering needed a variable that was absent"
+          "prompt selection succeeded but rendering needed a variable that was absent",
+        "render_error" => "prompt selection succeeded but message rendering failed"
       },
       "document_notes" => %{
         "production" =>
@@ -505,6 +518,9 @@ defmodule GenConformance do
           {:error, {:missing_variable, name}} ->
             %{"error" => "missing_variable", "variable" => name}
 
+          {:error, {:render, reason}} ->
+            %{"error" => "render_error", "message" => render_error_message(reason)}
+
           {:ok, rendered} ->
             {:ok, prompts} = Resolver.template_names(data, prompt)
 
@@ -554,6 +570,9 @@ defmodule GenConformance do
   end
 
   defp fill_prompt(_r, _variables), do: {:ok, %{}}
+
+  defp render_error_message(reason) when is_binary(reason), do: reason
+  defp render_error_message(reason), do: inspect(reason)
 
   defp message_map(message) do
     message
@@ -611,6 +630,13 @@ defmodule GenConformance do
           "input_schema" => [%{"name" => "input", "type" => "string", "required" => true}],
           "default_params" => %{},
           "payload_policy" => payload_policy("full", 1.0)
+        },
+        "legacy_slot" => %{
+          "id" => @uc_legacy_slot,
+          "kind" => "chat",
+          "input_schema" => [%{"name" => "history", "type" => "list", "required" => false}],
+          "default_params" => %{},
+          "payload_policy" => payload_policy("full", 1.0)
         }
       },
       "deployments" => %{
@@ -645,6 +671,14 @@ defmodule GenConformance do
           "params" => %{},
           "provider_options" => %{},
           "template_pins" => %{"default" => @pv_tool_chat}
+        },
+        "legacy_slot" => %{
+          "id" => @dep_legacy_slot_prod,
+          "revision" => "v2026.09.30-1",
+          "model_id" => @model_chat,
+          "params" => %{},
+          "provider_options" => %{},
+          "template_pins" => %{"default" => @pv_legacy_slot}
         }
       },
       "prompt_versions" => %{
@@ -703,6 +737,17 @@ defmodule GenConformance do
               "content" => [%{"type" => "text", "text" => "found"}]
             },
             %{"role" => "user", "content" => "Next: {{ input }}"}
+          ],
+          "text_template" => nil
+        },
+        @pv_legacy_slot => %{
+          "id" => @pv_legacy_slot,
+          "prompt_template_id" => @prompt_legacy_slot,
+          "number" => 1,
+          "engine" => "liquid",
+          "messages" => [
+            %{"role" => "system", "content" => "Use managed instructions."},
+            %{"type" => "slot", "name" => "history"}
           ],
           "text_template" => nil
         }

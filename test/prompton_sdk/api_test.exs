@@ -73,6 +73,52 @@ defmodule PromptOnSDK.APITest do
       refute log["input"]["tools"] |> hd() |> Map.has_key?("output_schema")
     end
 
+    test "apps can replace prepared messages with final conversation messages when tracking" do
+      PromptOnSDK.Test.stub("conversation_chat", %{
+        model: "openai/gpt-5-mini",
+        api: :chat_completions,
+        request_path: "/api/v1/chat/completions",
+        messages: [%{role: "system", content: "Answer in {{ tone }} tone."}],
+        params: %{temperature: 0.2}
+      })
+
+      history = [
+        %{"role" => "user", "content" => "Earlier question"},
+        %{"role" => "assistant", "content" => nil, "tool_calls" => [%{"id" => "call_1"}]},
+        %{
+          "role" => "tool",
+          "tool_call_id" => "call_1",
+          "content" => [%{"type" => "text", "text" => "result"}]
+        }
+      ]
+
+      {:ok, prompt} = PromptOnSDK.prompt("conversation_chat")
+      assert {:ok, request} = PromptOnSDK.request(prompt, %{tone: "direct"})
+
+      final_messages =
+        request.body["messages"] ++ history ++ [%{"role" => "user", "content" => "Now answer"}]
+
+      provider_body = Map.put(request.body, "messages", final_messages)
+
+      assert provider_body["temperature"] == 0.2
+      assert provider_body["messages"] == final_messages
+
+      assert {:ok, %{content: "ok"}} =
+               PromptOnSDK.track(
+                 prompt,
+                 %{
+                   id: "conversation-log",
+                   input_messages: final_messages,
+                   variables: %{tone: "direct"}
+                 },
+                 fn -> {:ok, %{content: "ok"}} end
+               )
+
+      log = assert_logged(%{"id" => "conversation-log"})
+      assert log["input"]["messages"] == final_messages
+      assert log["input"]["variables"] == %{"tone" => "direct"}
+    end
+
     test "prompt errors pass through" do
       assert PromptOnSDK.prompt("nope") == {:error, :unknown_prompt}
       assert PromptOnSDK.prompt("transcript_revision") == {:error, :unresolved}

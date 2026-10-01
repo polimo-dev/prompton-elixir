@@ -28,15 +28,17 @@ defmodule PromptOnSDK do
   ## Call flow
 
       question = "My invoice shows two charges this month."
+      history = load_conversation_messages(ticket_id)
 
       {:ok, prompt} = PromptOnSDK.prompt("support_reply")
-      {:ok, msgs} = PromptOnSDK.messages(prompt, %{question: question, language: "ko", plan: "pro"})
+      {:ok, request} = PromptOnSDK.request(prompt, %{language: "ko", plan: "pro"})
+      input_messages = request.body["messages"] ++ history ++ [%{"role" => "user", "content" => question}]
+      body = Map.put(request.body, "messages", input_messages)
 
       PromptOnSDK.track(prompt, %{end_user_ref: "cust_8f31", trace_id: "ticket:88213",
-                                    input_messages: msgs,
-                                    variables: %{question: question, language: "ko", plan: "pro"},
+                                    input_messages: input_messages,
+                                    variables: %{language: "ko", plan: "pro"},
                                     context: %{language: "ko", plan: "pro"}}, fn ->
-        body = PromptOnSDK.OpenRouter.request_body(prompt, msgs)
         case Req.post(url, json: body) do
           {:ok, %{status: 200, body: resp}} -> {:ok, PromptOnSDK.Result.from_openai(resp)}
           {:ok, %{status: s, body: b}}      -> {:error, %{kind: :http_5xx, status: s, message: inspect(b)}}

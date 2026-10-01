@@ -286,6 +286,25 @@
       "document_ref": "production",
       "environment": "production",
       "expect": {
+        "error": "render_error",
+        "message": "Message slots are not supported; compose conversation history in app code."
+      },
+      "name": "chat/legacy_message_slot_rejected",
+      "note": "message-history slots are retired; apps compose conversation history with rendered PromptOn-managed messages before the provider call",
+      "prompt_key": "legacy_slot",
+      "variables": {
+        "history": [
+          {
+            "content": "old turn",
+            "role": "assistant"
+          }
+        ]
+      }
+    },
+    {
+      "document_ref": "production",
+      "environment": "production",
+      "expect": {
         "error": "unknown_template",
         "key": "greeting",
         "template": "fr",
@@ -623,6 +642,16 @@
             "ko": "0198f2a1-0000-7000-8000-00000000a002"
           }
         },
+        "legacy_slot": {
+          "id": "0198f2a1-0000-7000-8000-00000000d005",
+          "model_id": "0198f2a1-0000-7000-8000-00000000e001",
+          "params": {},
+          "provider_options": {},
+          "revision": "v2026.09.30-1",
+          "template_pins": {
+            "default": "0198f2a1-0000-7000-8000-00000000a006"
+          }
+        },
         "summarize": {
           "id": "0198f2a1-0000-7000-8000-00000000d002",
           "model_id": "0198f2a1-0000-7000-8000-00000000e001",
@@ -759,6 +788,23 @@
           "number": 1,
           "prompt_template_id": "0198f2a1-0000-7000-8000-00000000b003",
           "text_template": null
+        },
+        "0198f2a1-0000-7000-8000-00000000a006": {
+          "engine": "liquid",
+          "id": "0198f2a1-0000-7000-8000-00000000a006",
+          "messages": [
+            {
+              "content": "Use managed instructions.",
+              "role": "system"
+            },
+            {
+              "name": "history",
+              "type": "slot"
+            }
+          ],
+          "number": 1,
+          "prompt_template_id": "0198f2a1-0000-7000-8000-00000000b004",
+          "text_template": null
         }
       },
       "prompts": {
@@ -805,6 +851,25 @@
               "name": "name",
               "required": true,
               "type": "string"
+            }
+          ],
+          "kind": "chat",
+          "payload_policy": {
+            "encrypt": false,
+            "max_bytes": 262144,
+            "mode": "full",
+            "retention_days": 30,
+            "sample_rate": 1.0
+          }
+        },
+        "legacy_slot": {
+          "default_params": {},
+          "id": "0198f2a1-0000-7000-8000-00000000c006",
+          "input_schema": [
+            {
+              "name": "history",
+              "required": false,
+              "type": "list"
             }
           ],
           "kind": "chat",
@@ -945,13 +1010,14 @@
   },
   "error_categories": {
     "missing_variable": "prompt selection succeeded but rendering needed a variable that was absent",
+    "render_error": "prompt selection succeeded but message rendering failed",
     "unknown_prompt": "the document has no prompt with that key",
     "unknown_template": "the deployment pins no template version under that name (no fallback to \"default\")",
     "unresolved": "the prompt exists but has no deployment in this environment"
   },
   "format_version": 1,
   "generated_from": {
-    "commit": "b8abd0194cb5fadef445ca6fbc1fba72a819b83f",
+    "commit": "79dbbfda70ed09be103e34022cebbf862d225370",
     "language": "elixir",
     "repo": "https://github.com/polimo-dev/prompton-elixir",
     "sdk": "prompton_sdk",

@@ -433,27 +433,23 @@ defmodule PromptOnSDK.PromptDocument do
   defp decode_message(msg) do
     base = PromptOnSDK.Decisions.normalize(msg)
 
-    if base["type"] == "slot" do
-      %{"type" => "slot", "name" => to_str(get(msg, "name"))}
-    else
-      message = %{role: to_str(get(msg, "role"))}
+    message = %{role: to_str(get(msg, "role"))}
 
-      message =
-        if Map.has_key?(base, "content") do
-          Map.put(message, :content, base["content"])
-        else
-          message
-        end
+    message =
+      if Map.has_key?(base, "content") do
+        Map.put(message, :content, base["content"])
+      else
+        message
+      end
 
-      message =
-        case to_str(get(msg, "name")) do
-          nil -> message
-          name -> Map.put(message, :name, name)
-        end
+    message =
+      case to_str(get(msg, "name")) do
+        nil -> message
+        name -> Map.put(message, :name, name)
+      end
 
-      extras = Map.drop(base, ~w(role content name))
-      Map.merge(extras, message)
-    end
+    extras = Map.drop(base, ~w(role content name))
+    Map.merge(extras, message)
   end
 
   defp decode_tools(nil), do: nil

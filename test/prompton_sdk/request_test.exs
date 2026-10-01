@@ -210,11 +210,9 @@ defmodule PromptOnSDK.RequestTest do
     end
   end
 
-  test "chat request splices history slots with tool calls" do
+  test "chat request keeps app-owned history outside the managed PromptOn messages" do
     messages = [
-      %{"role" => "system", "content" => "Tone {{ tone }}."},
-      %{"type" => "slot", "name" => "history"},
-      %{"role" => "user", "content" => "Next {{ input }}"}
+      %{"role" => "system", "content" => "Tone {{ tone }}."}
     ]
 
     history = [
@@ -232,48 +230,54 @@ defmodule PromptOnSDK.RequestTest do
       %{"role" => "tool", "tool_call_id" => "call_1", "content" => "tool result"}
     ]
 
-    assert {:ok, %{body: body}} =
-             PromptOnSDK.request(%{resolution() | messages: messages}, %{
-               tone: "direct",
-               input: "step",
-               history: history
-             })
+    assert {:ok, %{body: body} = request} =
+             PromptOnSDK.request(%{resolution() | messages: messages}, %{tone: "direct"})
+
+    final_messages =
+      body["messages"] ++ history ++ [%{"role" => "user", "content" => "current turn"}]
+
+    provider_body = Map.put(request.body, "messages", final_messages)
 
     assert body["messages"] == [
+             %{"role" => "system", "content" => "Tone direct."}
+           ]
+
+    assert provider_body["messages"] == [
              %{"role" => "system", "content" => "Tone direct."},
              Enum.at(history, 0),
              Enum.at(history, 1),
-             %{"role" => "user", "content" => "Next step"}
+             %{"role" => "user", "content" => "current turn"}
            ]
   end
 
-  test "runtime-inserted chat history rejects unsupported roles" do
+  test "message slots fail actionably at the request boundary" do
     messages = [%{"type" => "slot", "name" => "history"}]
 
-    assert {:error, {:render, {:invalid_message_slot, "history"}}} =
+    assert {:error,
+            {:render,
+             "Message slots are not supported; compose conversation history in app code."}} =
              PromptOnSDK.request(%{resolution() | messages: messages}, %{
-               history: [%{"role" => "critic", "content" => "not a provider role"}]
+               history: [%{"role" => "assistant", "content" => "old"}]
              })
+
+    assert {:error,
+            {:render,
+             "Message slots are not supported; compose conversation history in app code."}} =
+             PromptOnSDK.request(%{resolution() | messages: [%{type: "slot"}]}, %{})
   end
 
-  test "raw chat requests still require slots but do not render static or inserted content" do
+  test "raw chat requests reject slots before accepting inserted history" do
     messages = [
       %{"role" => "system", "content" => "{{ raw }}"},
       %{"type" => "slot", "name" => "history"}
     ]
 
-    assert {:error, {:missing_variable, "history"}} =
-             PromptOnSDK.request(%{resolution() | engine: :raw, messages: messages}, %{})
-
-    assert {:ok, %{body: body}} =
+    assert {:error,
+            {:render,
+             "Message slots are not supported; compose conversation history in app code."}} =
              PromptOnSDK.request(%{resolution() | engine: :raw, messages: messages}, %{
                history: [%{"role" => "assistant", "content" => "{{ inserted_raw }}"}]
              })
-
-    assert body["messages"] == [
-             %{"role" => "system", "content" => "{{ raw }}"},
-             %{"role" => "assistant", "content" => "{{ inserted_raw }}"}
-           ]
   end
 
   test "OpenAI and Groq use explicit paths without OpenRouter fields" do
@@ -480,7 +484,9 @@ defmodule PromptOnSDK.RequestTest do
                PromptOnSDK.request(%{resolution() | messages: messages}, %{})
     end
 
-    assert {:error, {:missing_variable, "history"}} =
+    assert {:error,
+            {:render,
+             "Message slots are not supported; compose conversation history in app code."}} =
              PromptOnSDK.request(
                %{resolution() | messages: [%{"type" => "slot", "name" => "history"}]},
                %{}

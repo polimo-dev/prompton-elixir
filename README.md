@@ -34,25 +34,37 @@ SDK 0.5 reads schema v7 documents and returns the deployed API, origin-relative 
 body. Your app supplies the provider origin and credentials and sends the HTTP request:
 
 ```elixir
+conversation_history = [
+  %{"role" => "user", "content" => "My invoice shows two charges."},
+  %{"role" => "assistant", "content" => "I can help check that."}
+]
+
+current_user_message = %{"role" => "user", "content" => "What should I do next?"}
+
 {:ok, prompt} = PromptOnSDK.prompt("support_route")
-{:ok, request} = PromptOnSDK.request(prompt, %{input: "My payment failed"})
+{:ok, request} = PromptOnSDK.request(prompt, %{tone: "concise"})
+input_messages = request.body["messages"] ++ conversation_history ++ [current_user_message]
+body = Map.put(request.body, "messages", input_messages)
+
 {:ok, response} = Req.request(
   method: request.method,
   url: provider_origin <> request.path,
   auth: {:bearer, provider_key},
-  json: request.body
+  json: body
 )
 ```
 
 `request.api` is `:chat_completions` or `:decisions`, taken from the deployment metadata rather than
 inferred from its model name. The pinned version determines the serving type even after the editor's
-type changes. Chat requests render `messages`; Decision requests render native `state` and `questions`
-recursively in string values, preserving JSON types, question names and choice labels.
+type changes. Chat requests render the PromptOn-managed `messages`, usually system/developer
+instructions; your app owns conversation history and the current user turn, then sends the final
+message array to the provider. Decision requests render native `state` and `questions` recursively in
+string values, preserving JSON types, question names and choice labels.
 
-Chat prompts may include a message slot such as `%{"type" => "slot", "name" => "history"}`.
-Pass `%{"history" => [...]}` with native chat message maps and the SDK splices those messages into
-the prepared request without rendering their content. This preserves `tool_calls`, `tool_call_id`,
-null content, array content and provider-specific JSON fields from your app's conversation state.
+The SDK no longer expands message-history slots such as `%{"type" => "slot", "name" => "history"}`.
+If an old prompt version still contains a slot, rendering fails with an actionable error. Compose
+history in application code so native provider fields such as `tool_calls`, `tool_call_id`, null
+content, array content and provider-specific JSON fields stay under your control.
 
 Schema v7 prompt versions may also include canonical tool configuration:
 
@@ -187,16 +199,19 @@ defmodule MyApp.Workers.SupportReply do
   @impl true
   def perform(%Oban.Job{id: job_id, attempt: attempt, args: %{"customer_ref" => customer_ref} = args}) do
     with {:ok, r} <- PromptOnSDK.prompt("support_reply"),
-         vars = %{question: args["question"], language: args["language"] || "en", plan: args["plan"]},
-         {:ok, msgs} <- PromptOnSDK.messages(r, vars) do
+         vars = %{language: args["language"] || "en", plan: args["plan"]},
+         {:ok, request} <- PromptOnSDK.request(r, vars) do
+      conversation_history = load_conversation_messages(args["conversation_id"])
+      current_user_message = %{"role" => "user", "content" => args["question"]}
+      input_messages = request.body["messages"] ++ conversation_history ++ [current_user_message]
+      body = Map.put(request.body, "messages", input_messages)
+
       PromptOnSDK.track(
         r,
         %{end_user_ref: customer_ref, trace_id: "ticket:#{args["ticket_id"]}", sequence: attempt,
-          input_messages: msgs, variables: vars, context: %{language: args["language"], plan: args["plan"]},
+          input_messages: input_messages, variables: vars, context: %{language: args["language"], plan: args["plan"]},
           metadata: %{ticket_id: args["ticket_id"], job_id: job_id, attempt: attempt}},
         fn ->
-          body = PromptOnSDK.OpenRouter.request_body(r, msgs)      # model/provider.only/params + usage.include
-
           case Req.post(openrouter_url(), auth: {:bearer, key()}, json: body, receive_timeout: 300_000, retry: false) do
             {:ok, %{status: 200, body: resp}} ->
               result = PromptOnSDK.Result.from_openai(resp)        # content, tokens, cost (BYOK-aware), stop_kind

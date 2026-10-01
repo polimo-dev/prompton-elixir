@@ -76,6 +76,7 @@ defmodule PromptOnSDK.Template do
 
   # Variables solid injects itself at render time (not input variables)
   @builtin_variables ~w(forloop)
+  @message_slot_error "Message slots are not supported; compose conversation history in app code."
 
   @type parsed :: Solid.Template.t()
   @type engine :: :liquid | :raw
@@ -343,7 +344,7 @@ defmodule PromptOnSDK.Template do
 
   defp render_message(message, {:ok, acc}, vars, opts) do
     case message_kind(message) do
-      :slot -> render_slot_message(message, vars, acc)
+      :slot -> {:halt, {:error, {:render, @message_slot_error}}}
       :template -> render_content_message(message, vars, opts, acc)
       :static -> {:cont, {:ok, [message | acc]}}
     end
@@ -357,13 +358,6 @@ defmodule PromptOnSDK.Template do
     end
   end
 
-  defp render_slot_message(message, vars, acc) do
-    case slot_messages(message, vars) do
-      {:ok, slot_messages} -> {:cont, {:ok, Enum.reverse(slot_messages) ++ acc}}
-      {:error, _} = error -> {:halt, error}
-    end
-  end
-
   defp render_content_message(message, vars, opts, acc) do
     case render(content_of(message), vars, opts) do
       {:ok, rendered} -> {:cont, {:ok, [put_content(message, rendered) | acc]}}
@@ -371,38 +365,9 @@ defmodule PromptOnSDK.Template do
     end
   end
 
-  defp message_slot?(%{"type" => "slot", "name" => name}) when is_binary(name), do: true
-  defp message_slot?(%{type: "slot", name: name}) when is_binary(name), do: true
+  defp message_slot?(%{"type" => "slot"}), do: true
+  defp message_slot?(%{type: "slot"}), do: true
   defp message_slot?(_), do: false
-
-  defp slot_messages(%{"name" => name}, vars), do: slot_messages(name, vars)
-  defp slot_messages(%{name: name}, vars), do: slot_messages(name, vars)
-
-  defp slot_messages(name, vars) do
-    case Map.fetch(vars, name) do
-      {:ok, messages} when is_list(messages) ->
-        if Enum.all?(messages, &chat_message?/1) do
-          {:ok, messages}
-        else
-          {:error, {:render, {:invalid_message_slot, name}}}
-        end
-
-      {:ok, _other} ->
-        {:error, {:render, {:invalid_message_slot, name}}}
-
-      :error ->
-        {:error, {:missing_variable, name}}
-    end
-  end
-
-  defp chat_message?(message) when is_map(message) and not is_struct(message) do
-    role = message[:role] || message["role"]
-
-    role in ["system", "user", "assistant", "developer", "tool"] and
-      PromptOnSDK.Decisions.json?(PromptOnSDK.Decisions.normalize(message))
-  end
-
-  defp chat_message?(_), do: false
 
   defp put_content(%{content: _} = m, c), do: %{m | content: c}
   defp put_content(%{"content" => _} = m, c), do: %{m | "content" => c}

@@ -194,79 +194,56 @@ defmodule PromptOnSDK.TemplateTest do
       assert {:ok, ^messages} = Template.render_messages(messages, %{}, engine: :raw)
     end
 
-    test "message slots splice native chat history without rendering inserted messages" do
+    test "ordinary history variables render as template data" do
       messages = [
         %{"role" => "system", "content" => "Use {{ tone }} tone."},
-        %{"type" => "slot", "name" => "history"},
-        %{"role" => "user", "content" => "Now answer {{ question }}."}
+        %{"role" => "user", "content" => "Previous: {{ history | join: \", \" }}"}
       ]
 
-      history = [
+      assert {:ok,
+              [
+                %{"role" => "system", "content" => "Use calm tone."},
+                %{"role" => "user", "content" => "Previous: alpha, beta"}
+              ]} = Template.render_messages(messages, %{tone: "calm", history: ["alpha", "beta"]})
+    end
+
+    test "non-slot type and name fields stay opaque provider data" do
+      messages = [
         %{
           "role" => "assistant",
-          "content" => nil,
-          "tool_calls" => [
-            %{
-              "id" => "call_1",
-              "type" => "function",
-              "function" => %{"name" => "search", "arguments" => "{\"q\":\"{{ raw }}\"}"}
-            }
-          ],
-          "reasoning" => %{"summary" => []}
-        },
-        %{
-          "role" => "tool",
-          "tool_call_id" => "call_1",
-          "content" => [%{"type" => "text", "text" => "result {{ raw }}"}]
+          "content" => [%{"type" => "text", "text" => "kept"}],
+          "type" => "message",
+          "name" => "assistant-name"
         }
       ]
 
-      assert {:ok, rendered} =
-               Template.render_messages(messages, %{
-                 tone: "calm",
-                 question: "briefly",
-                 history: history,
-                 raw: "should-not-render"
+      assert {:ok, ^messages} = Template.render_messages(messages, %{})
+    end
+
+    test "message slots are rejected even when variables are present or name is missing" do
+      assert {:error,
+              {:render,
+               "Message slots are not supported; compose conversation history in app code."}} =
+               Template.render_messages([%{"type" => "slot", "name" => "history"}], %{
+                 history: [%{"role" => "assistant", "content" => "old"}]
                })
 
-      assert rendered == [
-               %{"role" => "system", "content" => "Use calm tone."},
-               Enum.at(history, 0),
-               Enum.at(history, 1),
-               %{"role" => "user", "content" => "Now answer briefly."}
-             ]
+      assert {:error,
+              {:render,
+               "Message slots are not supported; compose conversation history in app code."}} =
+               Template.render_messages([%{type: "slot", role: "user", content: "ignored"}], %{})
     end
 
-    test "message slots report missing or malformed history" do
-      messages = [%{"type" => "slot", "name" => "history"}]
-
-      assert {:error, {:missing_variable, "history"}} =
-               Template.render_messages(messages, %{})
-
-      assert {:error, {:render, {:invalid_message_slot, "history"}}} =
-               Template.render_messages(messages, %{history: [%{"content" => "missing role"}]})
-    end
-
-    test "raw engine still requires and splices message slots without rendering content" do
+    test "raw engine also rejects message slots without rendering content first" do
       messages = [
         %{"role" => "system", "content" => "{{ keep_raw }}"},
         %{"type" => "slot", "name" => "history"}
       ]
 
-      assert {:error, {:missing_variable, "history"}} =
-               Template.render_messages(messages, %{}, engine: :raw)
-
-      assert {:ok, rendered} =
-               Template.render_messages(
-                 messages,
-                 %{history: [%{"role" => "assistant", "content" => "{{ also_raw }}"}]},
-                 engine: :raw
-               )
-
-      assert rendered == [
-               %{"role" => "system", "content" => "{{ keep_raw }}"},
-               %{"role" => "assistant", "content" => "{{ also_raw }}"}
-             ]
+      assert {:error,
+              {:render,
+               "Message slots are not supported; compose conversation history in app code."}} =
+               Template.render_messages(messages, %{history: []}, engine: :raw)
     end
   end
 

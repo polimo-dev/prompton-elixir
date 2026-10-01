@@ -23,7 +23,7 @@ Each file records the commit it was generated from in `generated_from.commit`.
 | File | What it pins down | Cases |
 |---|---|---|
 | `template.json` | Prompt rendering: the Liquid subset PromptOn allows | 72 render (4 non-normative), 10 lint, 5 detected-variables |
-| `prompt.json` | Prompt document + prompt (+ template name) → model, params, template version, filled messages | 3 documents, 16 cases |
+| `prompt.json` | Prompt document + prompt (+ template name) → model, params, template version, filled messages | 3 documents, 17 cases |
 | `truncation.json` | The payload policy the SDK applies to a monitoring log before sending it | 19 cases + 5 sampling buckets |
 | `stop_kind.json` | Provider `finish_reason` → PromptOn `stop_kind` | 22 cases |
 | `log_record.json` | Complete monitoring-log records and the batch envelope | 5 records |
@@ -130,6 +130,10 @@ genuinely contains `{{` or `{%`.
 Chat message maps are compared as whole JSON objects. SDKs must preserve native provider fields such
 as `tool_calls`, `tool_call_id`, null content and array content; conformance helpers must not reduce
 messages to only `role` and string `content`.
+
+Message-history slots are retired. A prompt version containing `%{"type": "slot"}` must fail with a
+render error telling the app to compose conversation history in app code. `history` used inside
+Liquid content remains an ordinary input variable.
 
 ### Merge order
 
