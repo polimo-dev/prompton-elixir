@@ -448,9 +448,18 @@ defmodule PromptOnSDK.PromptDocument do
         name -> Map.put(message, :name, name)
       end
 
-    extras = Map.drop(base, ~w(role content name))
+    extras =
+      base
+      |> Map.drop(~w(role content name))
+      |> normalize_retired_message_slot()
+
     Map.merge(extras, message)
   end
+
+  defp normalize_retired_message_slot(%{"type" => :slot} = message),
+    do: %{message | "type" => "slot"}
+
+  defp normalize_retired_message_slot(message), do: message
 
   defp decode_tools(nil), do: nil
   defp decode_tools(raw) when is_map(raw), do: PromptOnSDK.Decisions.normalize(raw)

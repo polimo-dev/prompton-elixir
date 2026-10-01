@@ -365,8 +365,8 @@ defmodule PromptOnSDK.Template do
     end
   end
 
-  defp message_slot?(%{"type" => "slot"}), do: true
-  defp message_slot?(%{type: "slot"}), do: true
+  defp message_slot?(%{"type" => type}) when type in ["slot", :slot], do: true
+  defp message_slot?(%{type: type}) when type in ["slot", :slot], do: true
   defp message_slot?(_), do: false
 
   defp put_content(%{content: _} = m, c), do: %{m | content: c}

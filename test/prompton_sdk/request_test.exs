@@ -264,6 +264,29 @@ defmodule PromptOnSDK.RequestTest do
             {:render,
              "Message slots are not supported; compose conversation history in app code."}} =
              PromptOnSDK.request(%{resolution() | messages: [%{type: "slot"}]}, %{})
+
+    assert {:error,
+            {:render,
+             "Message slots are not supported; compose conversation history in app code."}} =
+             PromptOnSDK.request(
+               %{resolution() | messages: [%{type: :slot, role: "system"}]},
+               %{}
+             )
+  end
+
+  test "prompt document decoding preserves mixed slot markers for render rejection" do
+    raw =
+      document("chat")
+      |> put_in(["prompt_versions", "v", "messages"], [%{type: :slot, role: "system"}])
+
+    assert {:ok, data, []} = PromptDocument.decode(raw)
+    assert {:ok, resolved} = Resolver.resolve(data, "route")
+    assert [%{"type" => "slot", role: "system"}] = resolved.messages
+
+    assert {:error,
+            {:render,
+             "Message slots are not supported; compose conversation history in app code."}} =
+             PromptOnSDK.request(resolved, %{})
   end
 
   test "raw chat requests reject slots before accepting inserted history" do

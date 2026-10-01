@@ -232,12 +232,17 @@ defmodule PromptOnSDK.TemplateTest do
               {:render,
                "Message slots are not supported; compose conversation history in app code."}} =
                Template.render_messages([%{type: "slot", role: "user", content: "ignored"}], %{})
+
+      assert {:error,
+              {:render,
+               "Message slots are not supported; compose conversation history in app code."}} =
+               Template.render_messages([%{type: :slot, role: "system"}], %{})
     end
 
     test "raw engine also rejects message slots without rendering content first" do
       messages = [
         %{"role" => "system", "content" => "{{ keep_raw }}"},
-        %{"type" => "slot", "name" => "history"}
+        %{type: :slot, role: "system"}
       ]
 
       assert {:error,
