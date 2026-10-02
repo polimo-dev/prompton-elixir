@@ -652,7 +652,23 @@ defmodule PromptOnSDK.SnapshotTest do
 
       assert {:ok, %{model: "provider/a-old"}} = PromptOnSDK.prompt("a")
       assert {:ok, %{model: "provider/b-new"}} = PromptOnSDK.prompt("b")
-      wait_until(fn -> File.exists?(path) and File.exists?(path <> ".meta.json") end)
+
+      # The first write already creates both files; wait for the second document's sidecar too.
+      wait_until(fn ->
+        case Store.load_file(path, :disk, "production") do
+          {:ok, entry} ->
+            match?(
+              %{
+                "a" => %{models: %{"shared-model" => %{model_id: "provider/a-old"}}},
+                "b" => %{models: %{"shared-model" => %{model_id: "provider/b-new"}}}
+              },
+              entry.prompt_docs
+            )
+
+          _ ->
+            false
+        end
+      end)
 
       stop_supervised!(PromptOnSDK)
       Store.erase()
