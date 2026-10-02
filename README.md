@@ -339,6 +339,18 @@ last valid value and tries the requested prompt again after the per-key attempt 
 
 ## Logging pipeline
 
+`track/3` and `log/1` omit generation logs with `status: :error`, `error.kind: :transport`,
+and an error message exactly matching `%Req.TransportError{reason: :closed}` or
+`failed to send request: %Req.TransportError{reason: :closed}` (string keys/values also work).
+These closed-connection failures are filtered before payload policy/redaction and are not sent to
+PromptOn, including when an application's retries are exhausted. Other transport errors remain
+visible. The SDK does not retry provider calls; `track/3` still returns the original result and emits
+its local telemetry, so application retry handling and successful retry logs are unchanged.
+`log_events/2` also omits error completion events whose `completion_output` is exactly one of those
+messages or `failed to call LLM: failed to send request: %Req.TransportError{reason: :closed}`.
+Other trace events keep their IDs and order. If every event is filtered, no request is sent;
+async calls return `:ok`, and sync calls return an acknowledgement with zero accepted events.
+
 `log/1` never raises. Before enqueueing, the SDK applies the prompt's `payload_policy` from the prompt document
 (`PromptOnSDK.Payload`): string `input`/`output` are always wrapped as objects (`{"text": …}` /
 `{"content": …}`); `mode :none` drops input/output; `:hash` replaces them with the pre-hashed wrapper
@@ -347,7 +359,7 @@ truncates to the same limits the server re-checks (message content ≤ `max_byte
 `max_bytes`, output content ≤ `max_bytes/4`, `tool_calls`/`variables` JSON ≤ `max_bytes/4`; head+tail kept,
 middle messages stubbed or dropped). `sample_rate` is decided by
 `first4bytes(sha256(id)) rem 10_000 < round(rate × 10_000)` — the server uses the same bucket — and errors
-and `stop_kind length` are always kept; `redact` runs last.
+and `stop_kind length` are always kept after the closed-connection filter; `redact` runs last.
 
 `PromptOnSDK.Buffer` batches (100 items / 1 MB / 2 s; each request ≤200 items **and** ≤4 MB encoded; 2
 concurrent sends), retries 5xx and transport errors with 1 s→60 s backoff, honours `Retry-After` on 429 and

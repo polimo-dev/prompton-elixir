@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Suppress closed Req connection transport failures from generation logs and error completion events before
+  enqueueing, preserving callback results, local telemetry, and application retry behavior.
 - Retire dynamic message slot expansion. Chat prompts now render only PromptOn-managed messages;
   applications compose conversation history and the current user turn before calling the provider.
 - Reject legacy `%{"type" => "slot"}` messages with

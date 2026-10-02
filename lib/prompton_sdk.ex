@@ -246,6 +246,9 @@ defmodule PromptOnSDK do
   Enqueues one log asynchronously (§6.4 format, atom or string keys). **Never raises.**
 
   * Fills in `id`/`started_at`/`sdk` when they are absent.
+  * Suppresses transport errors whose message is the inspected
+    `%Req.TransportError{reason: :closed}`, optionally prefixed with `failed to send request: `.
+    Filtering happens before payload policy/redaction; application retries are unchanged.
   * Applies the payload policy (`PromptOnSDK.Payload`): `opts[:policy]` (the Prompt's
     `payload_policy`) or the current prompt document's policy for that Prompt, else
     `config.payload_defaults`.
@@ -257,9 +260,14 @@ defmodule PromptOnSDK do
   def log(gen, opts \\ []) do
     config = Config.get()
     gen = gen |> deep_stringify() |> put_defaults()
-    policy = Keyword.get(opts, :policy) || snapshot_policy(gen["prompt_key"])
-    gen = Payload.apply(gen, policy, config)
-    dispatch(:logs, {:prompton_log, gen}, gen, config)
+
+    if closed_transport_log?(gen) do
+      :ok
+    else
+      policy = Keyword.get(opts, :policy) || snapshot_policy(gen["prompt_key"])
+      gen = Payload.apply(gen, policy, config)
+      dispatch(:logs, {:prompton_log, gen}, gen, config)
+    end
   rescue
     e ->
       Logger.warning("[PromptOn] log/1 dropped a log: #{Exception.message(e)}")
@@ -269,6 +277,19 @@ defmodule PromptOnSDK do
       Logger.warning("[PromptOn] log/1 dropped a log: #{inspect({kind, value})}")
       :ok
   end
+
+  defp closed_transport_log?(%{
+         "status" => status,
+         "error" => %{"kind" => kind, "message" => message}
+       })
+       when status in [:error, "error"] and kind in [:transport, "transport"] do
+    message in [
+      "%Req.TransportError{reason: :closed}",
+      "failed to send request: %Req.TransportError{reason: :closed}"
+    ]
+  end
+
+  defp closed_transport_log?(_gen), do: false
 
   @event_kinds ~w(tool_attempt completion)
   @event_statuses ~w(started ok error denied cancelled timeout missing incomplete)
@@ -288,6 +309,11 @@ defmodule PromptOnSDK do
 
   With `sync: true`, returns the server response (including any `rejected` evidence). With
   `mode: :test`, sends `{:prompton_events, events}` to the calling process.
+
+  Error completion events containing the same closed Req connection message filtered by `log/2`
+  are omitted, also allowing the application prefix `failed to call LLM: `. If all events are
+  filtered, returns `:ok` asynchronously or a zero-accepted acknowledgement synchronously,
+  without sending a request. Other events retain their IDs and order.
   """
   @spec log_events(map() | [map()], keyword()) ::
           :ok | {:ok, PromptOnSDK.Client.post_response()} | {:error, term()}
@@ -295,7 +321,7 @@ defmodule PromptOnSDK do
     config = Config.get()
 
     with {:ok, events} <- normalize_events(events) do
-      submit_events(config, events, opts)
+      submit_events(config, Enum.reject(events, &closed_transport_completion?/1), opts)
     end
   rescue
     e ->
@@ -305,6 +331,26 @@ defmodule PromptOnSDK do
     kind, value ->
       Logger.warning("[PromptOn] log_events/2 dropped events: #{inspect({kind, value})}")
       {:error, :invalid_events}
+  end
+
+  defp closed_transport_completion?(%{
+         "event_kind" => "completion",
+         "status" => "error",
+         "completion_output" => message
+       }) do
+    message in [
+      "%Req.TransportError{reason: :closed}",
+      "failed to send request: %Req.TransportError{reason: :closed}",
+      "failed to call LLM: failed to send request: %Req.TransportError{reason: :closed}"
+    ]
+  end
+
+  defp closed_transport_completion?(_event), do: false
+
+  defp submit_events(_config, [], opts) do
+    if Keyword.get(opts, :sync, false),
+      do: {:ok, accepted_events_response([])},
+      else: :ok
   end
 
   defp submit_events(%{mode: :test}, events, opts) do
