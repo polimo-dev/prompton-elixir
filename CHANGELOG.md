@@ -32,7 +32,7 @@
 
 ## 0.4.1
 
-- Patch release aligning all SDKs on the current `/prompts` runtime API and `prompt_key` log contract. Elixir already used the canonical paths and fields; this release keeps version parity.
+- Patch release aligning all SDKs on the current `/prompts` API and `prompt_key` log contract. Elixir already used the canonical paths and fields; this release keeps version parity.
 
 ## 0.4.0
 
