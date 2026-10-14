@@ -38,7 +38,7 @@ defmodule PromptOnSDK.Template do
     body execution path), a `for` enumerable, `assign`, or `{{ }}` output is always an error.
     That is, "missing required variable = error" is guaranteed at **output positions**, while
     variables referenced only in condition expressions are caught by `variables/1` (the server's
-    `detected_variables`) and the Prompt `input_schema`.
+    `detected_variables`) and the Prompt `variables`.
   * The `default` filter does **not** rescue an undefined variable: `{{ x | default: "n" }}` is an
     error when the `x` key is absent altogether. A key whose value is `nil` (`%{"x" => nil}`)
     counts as defined and `default` applies ("n"). For optional variables, the app passes `nil`
@@ -74,7 +74,7 @@ defmodule PromptOnSDK.Template do
 
   @allowed_filters ~w(size join default)
 
-  # Variables solid injects itself at render time (not input variables)
+  # Variables solid injects itself at render time (not variables)
   @builtin_variables ~w(forloop)
   @message_slot_error "Message slots are not supported; compose conversation history in app code."
 
@@ -167,7 +167,7 @@ defmodule PromptOnSDK.Template do
   end
 
   @doc """
-  The names of the **top-level input variables** the template references (sorted, deduplicated).
+  The names of the **top-level variables** the template references (sorted, deduplicated).
   `for` loop variables, `assign` targets, and `forloop` are excluded. If parsing fails, the
   `{{ ident` / `{% tag ident` patterns are scraped conservatively with a regex.
   """

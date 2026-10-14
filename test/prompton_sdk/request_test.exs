@@ -46,23 +46,23 @@ defmodule PromptOnSDK.RequestTest do
 
   defp document(kind \\ "decision") do
     %{
-      "schema_version" => 6,
+      "schema_version" => 1,
       "environment" => "test",
-      "prompts" => %{"route" => %{"id" => "p", "kind" => kind}},
+      "prompts" => %{"route" => %{"kind" => kind, "variables" => []}},
       "deployments" => %{
         "route" => %{
-          "id" => "d",
-          "model_id" => "m",
           "revision" => "v2026.09.30-2",
+          "provider" => "openrouter",
+          "model" => "typesafe/jev-1.13",
+          "prompt_version" => 3,
           "api" => if(kind == "chat", do: "chat_completions", else: "decisions"),
           "request_path" =>
-            if(kind == "chat", do: "/api/v1/chat/completions", else: "/api/v1/systemone"),
-          "template_pins" => %{"default" => "v"}
+            if(kind == "chat", do: "/api/v1/chat/completions", else: "/api/v1/systemone")
         }
       },
       "prompt_versions" => %{
-        "v" => %{
-          "id" => "v",
+        "route@3" => %{
+          "prompt" => "route",
           "kind" => kind,
           "number" => 3,
           "engine" => "liquid",
@@ -71,7 +71,10 @@ defmodule PromptOnSDK.RequestTest do
         }
       },
       "models" => %{
-        "m" => %{"id" => "m", "provider" => "openrouter", "model_id" => "typesafe/jev-1.13"}
+        "openrouter:typesafe/jev-1.13" => %{
+          "provider" => "openrouter",
+          "model" => "typesafe/jev-1.13"
+        }
       }
     }
   end
@@ -277,7 +280,7 @@ defmodule PromptOnSDK.RequestTest do
   test "prompt document decoding preserves mixed slot markers for render rejection" do
     raw =
       document("chat")
-      |> put_in(["prompt_versions", "v", "messages"], [%{type: :slot, role: "system"}])
+      |> put_in(["prompt_versions", "route@3", "messages"], [%{type: :slot, role: "system"}])
 
     assert {:ok, data, []} = PromptDocument.decode(raw)
     assert {:ok, resolved} = Resolver.resolve(data, "route")
@@ -574,10 +577,10 @@ defmodule PromptOnSDK.RequestTest do
     end
   end
 
-  test "schema v6 preserves fields through resolution and Prompt round trip" do
+  test "schema v1 preserves fields through resolution and Prompt round trip" do
     assert {:ok, decoded, []} = PromptDocument.decode(document())
     assert decoded.deployments["route"].api == :decisions
-    assert decoded.prompt_versions["v"].kind == :decision
+    assert decoded.prompt_versions["route@3"].kind == :decision
     assert {:ok, r} = Resolver.resolve(decoded, "route")
     assert r.kind == :decision
     assert r.decision == decision()
@@ -586,11 +589,10 @@ defmodule PromptOnSDK.RequestTest do
     assert {:ok, _} = PromptOnSDK.request(r, %{input: "hello", team: "Support"})
   end
 
-  test "schema v7 preserves tool definitions through resolution and Prompt round trip" do
+  test "schema v1 preserves tool definitions through resolution and Prompt round trip" do
     doc =
       document("chat")
-      |> Map.put("schema_version", 7)
-      |> put_in(["prompt_versions", "v", "tools"], %{
+      |> put_in(["prompt_versions", "route@3", "tools"], %{
         "definitions" => [
           %{
             "type" => "function",
@@ -602,10 +604,10 @@ defmodule PromptOnSDK.RequestTest do
       })
 
     assert {:ok, decoded, []} = PromptDocument.decode(doc)
-    assert decoded.schema_version == 7
-    assert decoded.prompt_versions["v"].tools["tool_choice"] == "auto"
+    assert decoded.schema_version == 1
+    assert decoded.prompt_versions["route@3"].tools["tool_choice"] == "auto"
     assert {:ok, r} = Resolver.resolve(decoded, "route")
-    assert r.tools == decoded.prompt_versions["v"].tools
+    assert r.tools == decoded.prompt_versions["route@3"].tools
     assert r == r |> Prompt.from_resolution() |> Prompt.to_resolution()
 
     assert {:ok, %{body: body}} = PromptOnSDK.request(r, %{input: "hi"})
@@ -663,8 +665,8 @@ defmodule PromptOnSDK.RequestTest do
     assert {:ok, %{api: :chat_completions}} = PromptOnSDK.request(r, %{input: "hi"})
   end
 
-  test "missing v6 version kind or invalid API cannot silently become Chat" do
-    doc = put_in(document("chat"), ["prompt_versions", "v", "kind"], nil)
+  test "missing version kind or invalid API cannot silently become Chat" do
+    doc = put_in(document("chat"), ["prompt_versions", "route@3", "kind"], nil)
     {:ok, data, _} = PromptDocument.decode(doc)
     {:ok, r} = Resolver.resolve(data, "route")
     assert {:error, :unsupported_prompt_kind} = PromptOnSDK.request(r, %{})
@@ -675,27 +677,21 @@ defmodule PromptOnSDK.RequestTest do
     assert {:error, :missing_request_metadata} = PromptOnSDK.request(r, %{})
   end
 
-  test "legacy schema v5 still renders messages and refuses prepared request even with added metadata" do
-    doc = Map.put(document("chat"), "schema_version", 5)
-    {:ok, data, []} = PromptDocument.decode(doc)
-    {:ok, r} = Resolver.resolve(data, "route")
-
-    assert {:ok, [%{content: "hi"}]} =
-             r |> Prompt.from_resolution() |> PromptOnSDK.messages(%{input: "hi"})
-
-    assert {:error, :missing_request_metadata} = PromptOnSDK.request(r, %{input: "hi"})
+  test "non-v1 schema documents are rejected" do
+    assert {:error, {:unsupported_schema_version, 5}} =
+             document("chat") |> Map.put("schema_version", 5) |> PromptDocument.decode()
   end
 
-  test "disk and bundled v6 documents preserve prepared request metadata and native templates" do
+  test "disk and bundled schema v1 documents preserve prepared request metadata and native templates" do
     path = tmp_path("decision.json")
-    write_snapshot_file(path, document(), %{"etag" => "v6"})
+    write_snapshot_file(path, document(), %{"etag" => "v1"})
 
     for source <- [:disk, :bundle] do
       assert {:ok, entry} = Store.load_file(path, source, "test")
       Store.put(entry)
       assert {:ok, prompt} = PromptOnSDK.prompt("route")
       assert prompt.source == source
-      assert prompt.etag == "v6"
+      assert prompt.etag == "v1"
 
       assert {:ok, %{api: :decisions, body: body}} =
                PromptOnSDK.request(prompt, %{input: "cached", team: "Support"})
@@ -714,11 +710,9 @@ defmodule PromptOnSDK.RequestTest do
     }
 
     PromptOnSDK.Test.stub("route", spec)
-    PromptOnSDK.Test.stub("route", Map.put(spec, :template, "ko"))
     {:ok, prompt} = PromptOnSDK.prompt("route")
 
-    assert {:ok, request} =
-             PromptOnSDK.request(prompt, %{input: "hello", team: "Support"}, template: "ko")
+    assert {:ok, request} = PromptOnSDK.request(prompt, %{input: "hello", team: "Support"})
 
     assert {:ok, result} =
              PromptOnSDK.track(
@@ -729,7 +723,7 @@ defmodule PromptOnSDK.RequestTest do
 
     assert result.result == response()["answers"]
     assert_receive {:prompton_log, log}
-    assert log["template"] == "ko"
+    assert log["template"] == "default"
     refute Map.has_key?(log, "prompt_version_id")
     assert log["prompt_version_number"] == 1
     assert log["kind"] == "decision"

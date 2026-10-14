@@ -1,5 +1,5 @@
 defmodule PromptOnSDK.PromptDocumentTest do
-  @moduledoc "Prompt document v4 decoding contract; v1-v3 are no longer read."
+  @moduledoc "Schema v1 prompt document decoding contract."
 
   use ExUnit.Case, async: true
 
@@ -10,38 +10,34 @@ defmodule PromptOnSDK.PromptDocumentTest do
       assert {:ok, data, []} = PromptDocument.decode(Fixtures.snapshot())
 
       assert %PromptDocument{} = data
-      assert data.schema_version == 5
+      assert data.schema_version == 1
       assert data.project == "heydiary"
       assert data.environment == "production"
       assert map_size(data.prompts) == 5
-      assert map_size(data.deployments) == 4
-      assert map_size(data.prompt_versions) == 4
+      assert map_size(data.deployments) == 3
+      assert map_size(data.prompt_versions) == 3
       assert map_size(data.models) == 5
     end
 
-    test "deployments decode to pins" do
+    test "deployments decode to readable default pins" do
       {:ok, data, []} = PromptDocument.decode(Fixtures.snapshot())
       deployment = PromptDocument.deployment(data, "diary_generation")
 
-      assert deployment.id == Fixtures.id(:d_diary)
+      assert deployment.id == nil
       assert deployment.prompt_key == "diary_generation"
       assert deployment.revision == "v2026.09.30-4"
-      assert deployment.model_id == Fixtures.id(:m_sonnet4)
+      assert deployment.model_id == "openrouter:anthropic/claude-sonnet-4"
       assert deployment.params == %{"temperature" => 0.4}
       assert deployment.provider_options == %{"allow_fallbacks" => false}
-
-      assert deployment.template_pins == %{
-               "default" => Fixtures.id(:pv_en),
-               "ko" => Fixtures.id(:pv_ko)
-             }
+      assert deployment.template_pins == %{"default" => "diary_generation@2"}
     end
 
     test "the deployment is attached to its prompt" do
       {:ok, data, []} = PromptDocument.decode(Fixtures.snapshot())
 
-      assert data.prompts["diary_generation"].deployment.id == Fixtures.id(:d_diary)
+      assert data.prompts["diary_generation"].deployment.id == nil
       assert data.prompts["transcript_revision"].deployment == nil
-      assert PromptDocument.deployment(data, :chat_response).id == Fixtures.id(:d_chat)
+      assert PromptDocument.deployment(data, :chat_response).id == nil
       assert PromptDocument.deployment(data, "nope") == nil
     end
 
@@ -50,40 +46,52 @@ defmodule PromptOnSDK.PromptDocumentTest do
 
       assert data.prompts["diary_generation"].kind == :chat
       assert data.prompts["diary_embedding"].kind == :embedding
-      assert data.prompt_versions[Fixtures.id(:pv_stt)].engine == :raw
-      assert data.models[Fixtures.id(:m_sonnet4)].provider == :openrouter
-      assert data.models[Fixtures.id(:m_opus4)].status == :deprecated
+      assert data.prompt_versions["voice_transcription@1"].engine == :raw
+      assert data.models["openrouter:anthropic/claude-sonnet-4"].provider == :openrouter
+      assert data.models["openrouter:anthropic/claude-opus-4"].status == :deprecated
       assert data.prompts["diary_generation"].default_params == %{"temperature" => 0.5}
       assert data.prompts["diary_generation"].payload_policy.mode == :full
     end
 
     test "atom-keyed maps (hand-written test documents) decode too" do
       map = %{
-        schema_version: 5,
+        schema_version: 1,
         environment: "staging",
-        prompts: %{"greet" => %{id: "u1", kind: "chat"}},
+        prompts: %{"greet" => %{kind: "chat", variables: []}},
         deployments: %{
           "greet" => %{
-            id: "d1",
             revision: "v2026.09.30-1",
-            model_id: "m1",
-            template_pins: %{"default" => "p1"}
+            provider: "openrouter",
+            model: "openai/gpt-5-mini",
+            prompt_version: 1
           }
         },
-        prompt_versions: %{"p1" => %{id: "p1", messages: [%{role: "system", content: "hi"}]}},
-        models: %{"m1" => %{id: "m1", model_id: "openai/gpt-5-mini"}}
+        prompt_versions: %{
+          "greet@1" => %{
+            prompt: "greet",
+            number: 1,
+            kind: "chat",
+            messages: [%{role: "system", content: "hi"}]
+          }
+        },
+        models: %{
+          "openrouter:openai/gpt-5-mini" => %{
+            provider: "openrouter",
+            model: "openai/gpt-5-mini"
+          }
+        }
       }
 
       assert {:ok, data, []} = PromptDocument.decode(map)
       assert data.environment == "staging"
-      assert data.deployments["greet"].template_pins == %{"default" => "p1"}
+      assert data.deployments["greet"].template_pins == %{"default" => "greet@1"}
     end
 
     test "decode_json/1 round-trips" do
       json = Jason.encode!(Fixtures.snapshot())
       assert {:ok, data, []} = PromptDocument.decode_json(json)
       assert %PromptDocument{} = data
-      assert data.deployments["chat_response"].model_id == Fixtures.id(:m_gpt5_mini)
+      assert data.deployments["chat_response"].model_id == "openrouter:openai/gpt-5-mini"
     end
 
     test "a decoded prompt document passes through" do
@@ -93,50 +101,11 @@ defmodule PromptOnSDK.PromptDocumentTest do
   end
 
   describe "schema versions" do
-    test "v1, v2, and v3 documents are refused" do
-      for version <- [1, 2, 3] do
-        map = Map.put(Fixtures.snapshot(), "schema_version", version)
-        assert {:error, {:unsupported_schema_version, ^version}} = PromptDocument.decode(map)
-      end
-    end
-
-    test "schema v8 readable resource keys decode without resource UUIDs" do
-      map = %{
-        "schema_version" => 8,
-        "project" => "helpdesk",
-        "environment" => "production",
-        "prompts" => %{
-          "support_reply" => %{"kind" => "chat", "default_params" => %{"temperature" => 0.5}}
-        },
-        "deployments" => %{
-          "support_reply" => %{
-            "revision" => "v2026.09.30-3",
-            "provider" => "openrouter",
-            "model" => "openai/gpt-4o-mini",
-            "prompt_version" => 2,
-            "params" => %{"temperature" => 0.3}
-          }
-        },
-        "prompt_versions" => %{
-          "support_reply@2" => %{
-            "prompt" => "support_reply",
-            "number" => 2,
-            "kind" => "chat",
-            "engine" => "liquid",
-            "messages" => [%{"role" => "user", "content" => "{{ question }}"}]
-          }
-        },
-        "models" => %{
-          "openrouter:openai/gpt-4o-mini" => %{
-            "provider" => "openrouter",
-            "model" => "openai/gpt-4o-mini",
-            "status" => "active"
-          }
-        }
-      }
+    test "schema v1 readable resource keys decode without resource UUIDs" do
+      map = readable_bundle()
 
       assert {:ok, data, []} = PromptDocument.decode(map)
-      assert data.schema_version == 8
+      assert data.schema_version == 1
       assert data.deployments["support_reply"].id == nil
       assert data.deployments["support_reply"].model_id == "openrouter:openai/gpt-4o-mini"
       assert data.deployments["support_reply"].template_pins == %{"default" => "support_reply@2"}
@@ -145,39 +114,11 @@ defmodule PromptOnSDK.PromptDocumentTest do
       assert data.models["openrouter:openai/gpt-4o-mini"].model_id == "openai/gpt-4o-mini"
     end
 
-    test "schema v9 single prompt envelope decodes through the normal document view" do
-      map = %{
-        "schema_version" => 9,
-        "project" => "helpdesk",
-        "environment" => "production",
-        "prompt" => %{
-          "key" => "support_reply",
-          "kind" => "chat",
-          "default_params" => %{"temperature" => 0.5}
-        },
-        "deployment" => %{
-          "revision" => "v2026.09.30-3",
-          "provider" => "openrouter",
-          "model" => "openai/gpt-4o-mini",
-          "prompt_version" => 2,
-          "params" => %{"temperature" => 0.3}
-        },
-        "prompt_version" => %{
-          "prompt" => "support_reply",
-          "number" => 2,
-          "kind" => "chat",
-          "engine" => "liquid",
-          "messages" => [%{"role" => "user", "content" => "{{ question }}"}]
-        },
-        "model" => %{
-          "provider" => "openrouter",
-          "model" => "openai/gpt-4o-mini",
-          "status" => "active"
-        }
-      }
+    test "schema v1 single prompt envelope decodes through the normal document view" do
+      map = single_prompt()
 
       assert {:ok, data, []} = PromptDocument.decode(map)
-      assert data.schema_version == 9
+      assert data.schema_version == 1
       assert data.prompts["support_reply"].key == "support_reply"
       assert data.deployments["support_reply"].model_id == "openrouter:openai/gpt-4o-mini"
       assert data.deployments["support_reply"].template_pins == %{"default" => "support_reply@2"}
@@ -185,23 +126,8 @@ defmodule PromptOnSDK.PromptDocumentTest do
       assert data.models["openrouter:openai/gpt-4o-mini"].model_id == "openai/gpt-4o-mini"
     end
 
-    test "schema v9 single prompt envelope rejects mixed and mismatched identities" do
-      map = %{
-        "schema_version" => 9,
-        "prompt" => %{"key" => "support_reply", "kind" => "chat"},
-        "deployment" => %{
-          "provider" => "openrouter",
-          "model" => "openai/gpt-4o-mini",
-          "prompt_version" => 2
-        },
-        "prompt_version" => %{
-          "prompt" => "support_reply",
-          "number" => 2,
-          "kind" => "chat"
-        },
-        "model" => %{"provider" => "openrouter", "model" => "openai/gpt-4o-mini"}
-      }
-
+    test "schema v1 single prompt envelope rejects mixed and mismatched identities" do
+      map = single_prompt()
       assert {:ok, _data, []} = PromptDocument.decode(map)
 
       mixed = Map.put(map, "prompts", %{})
@@ -210,6 +136,10 @@ defmodule PromptOnSDK.PromptDocumentTest do
 
       mixed_null = Map.put(map, "prompts", nil)
       assert {:error, {:invalid_prompt_document, message}} = PromptDocument.decode(mixed_null)
+      assert message =~ "must not include prompts"
+
+      partial_mixed = Map.put(readable_bundle(), "deployment", %{})
+      assert {:error, {:invalid_prompt_document, message}} = PromptDocument.decode(partial_mixed)
       assert message =~ "must not include prompts"
 
       bad_prompt = put_in(map, ["prompt_version", "prompt"], "other")
@@ -225,28 +155,8 @@ defmodule PromptOnSDK.PromptDocumentTest do
       assert message =~ "must match model"
     end
 
-    test "schema v8 requires strict readable resource references" do
-      map = %{
-        "schema_version" => 8,
-        "prompts" => %{"support_reply" => %{"kind" => "chat"}},
-        "deployments" => %{
-          "support_reply" => %{
-            "provider" => "openrouter",
-            "model" => "openai/gpt-4o-mini",
-            "prompt_version" => 2
-          }
-        },
-        "prompt_versions" => %{
-          "support_reply@2" => %{"prompt" => "support_reply", "number" => 2, "kind" => "chat"}
-        },
-        "models" => %{
-          "openrouter:openai/gpt-4o-mini" => %{
-            "provider" => "openrouter",
-            "model" => "openai/gpt-4o-mini"
-          }
-        }
-      }
-
+    test "schema v1 requires strict readable resource references" do
+      map = readable_bundle()
       assert {:ok, _data, []} = PromptDocument.decode(map)
 
       string_pin = put_in(map, ["deployments", "support_reply", "prompt_version"], "2")
@@ -287,10 +197,11 @@ defmodule PromptOnSDK.PromptDocumentTest do
       assert {:ok, _data, []} = PromptDocument.decode(colon_model)
     end
 
-    test "a newer version is refused" do
-      map = Map.put(Fixtures.snapshot(), "schema_version", 10)
-
-      assert {:error, {:unsupported_schema_version, 10}} = PromptDocument.decode(map)
+    test "any non-v1 version is refused" do
+      for version <- [2, 3, 5, 8, 9, 10] do
+        map = Map.put(Fixtures.snapshot(), "schema_version", version)
+        assert {:error, {:unsupported_schema_version, ^version}} = PromptDocument.decode(map)
+      end
     end
 
     test "schema_version is required even when `deployments` is present" do
@@ -308,7 +219,7 @@ defmodule PromptOnSDK.PromptDocumentTest do
 
     test "a non-integer version is an error" do
       assert {:error, {:invalid_prompt_document, message}} =
-               PromptDocument.decode(Map.put(Fixtures.snapshot(), "schema_version", "4"))
+               PromptDocument.decode(Map.put(Fixtures.snapshot(), "schema_version", "1"))
 
       assert message =~ "positive integer"
     end
@@ -317,9 +228,42 @@ defmodule PromptOnSDK.PromptDocumentTest do
   describe "malformed input" do
     test "prompts is required" do
       assert {:error, {:invalid_prompt_document, message}} =
-               PromptDocument.decode(%{"schema_version" => 5})
+               PromptDocument.decode(%{"schema_version" => 1})
 
       assert message =~ "prompts is required"
+    end
+
+    test "a discovery list is not loadable configuration" do
+      map = %{"schema_version" => 1, "prompts" => [%{"key" => "support_reply", "kind" => "chat"}]}
+      assert {:error, {:invalid_prompt_document, message}} = PromptDocument.decode(map)
+      assert message =~ "discovery-only"
+    end
+
+    test "aggregate bundles require all schema v1 collection maps" do
+      base = readable_bundle()
+
+      for key <- ~w(deployments prompt_versions models) do
+        missing = Map.delete(base, key)
+        assert {:error, {:invalid_prompt_document, message}} = PromptDocument.decode(missing)
+        assert message =~ "#{key} is required"
+
+        list_value = Map.put(base, key, [])
+        assert {:error, {:invalid_prompt_document, message}} = PromptDocument.decode(list_value)
+        assert message =~ "#{key} must be an object"
+      end
+
+      empty = %{
+        "schema_version" => 1,
+        "project" => "empty",
+        "environment" => "production",
+        "prompts" => %{},
+        "deployments" => %{},
+        "prompt_versions" => %{},
+        "models" => %{}
+      }
+
+      assert {:ok, data, []} = PromptDocument.decode(empty)
+      assert data.prompts == %{}
     end
 
     test "a non-map top level is refused" do
@@ -328,13 +272,11 @@ defmodule PromptOnSDK.PromptDocumentTest do
       assert {:error, {:invalid_json, _}} = PromptDocument.decode_json("{oops")
     end
 
-    test "a broken deployment entry is warned about, the rest still decodes" do
+    test "a broken deployment entry is rejected before decoding" do
       map = put_in(Fixtures.snapshot(), ["deployments", "chat_response"], "nope")
 
-      assert {:ok, data, warnings} = PromptDocument.decode(map)
-      assert {:invalid_deployment, {"chat_response", "nope"}} in warnings
-      assert data.deployments["diary_generation"].revision == "v2026.09.30-4"
-      refute Map.has_key?(data.deployments, "chat_response")
+      assert {:error, {:invalid_prompt_document, message}} = PromptDocument.decode(map)
+      assert message =~ "deployments.chat_response must be an object"
     end
 
     test "a revision label with a trailing newline is rejected" do
@@ -350,12 +292,11 @@ defmodule PromptOnSDK.PromptDocumentTest do
       assert data.deployments["chat_response"].revision == nil
     end
 
-    test "broken template_pins are warned about" do
-      map = put_in(Fixtures.snapshot(), ["deployments", "chat_response", "template_pins"], "nope")
+    test "an invalid deployment prompt_version warns during decoding" do
+      map = put_in(Fixtures.snapshot(), ["deployments", "chat_response", "prompt_version"], nil)
 
-      assert {:ok, data, warnings} = PromptDocument.decode(map)
-      assert {:invalid_template_pins, {"chat_response", "nope"}} in warnings
-      assert data.deployments["chat_response"].template_pins == %{}
+      assert {:error, {:invalid_prompt_document, message}} = PromptDocument.decode(map)
+      assert message =~ "prompt_version is required"
     end
 
     test "an unknown kind falls back to chat with a warning" do
@@ -365,5 +306,80 @@ defmodule PromptOnSDK.PromptDocumentTest do
       assert {:unknown_kind, "vision"} in warnings
       assert data.prompts["chat_response"].kind == :chat
     end
+  end
+
+  defp readable_bundle do
+    %{
+      "schema_version" => 1,
+      "project" => "helpdesk",
+      "environment" => "production",
+      "prompts" => %{
+        "support_reply" => %{
+          "kind" => "chat",
+          "variables" => [
+            %{"name" => "question", "type" => "string", "required" => true, "example" => "Hi"}
+          ],
+          "default_params" => %{"temperature" => 0.5}
+        }
+      },
+      "deployments" => %{
+        "support_reply" => %{
+          "revision" => "v2026.09.30-3",
+          "provider" => "openrouter",
+          "model" => "openai/gpt-4o-mini",
+          "prompt_version" => 2,
+          "params" => %{"temperature" => 0.3}
+        }
+      },
+      "prompt_versions" => %{
+        "support_reply@2" => %{
+          "prompt" => "support_reply",
+          "number" => 2,
+          "kind" => "chat",
+          "engine" => "liquid",
+          "messages" => [%{"role" => "user", "content" => "{{ question }}"}]
+        }
+      },
+      "models" => %{
+        "openrouter:openai/gpt-4o-mini" => %{
+          "provider" => "openrouter",
+          "model" => "openai/gpt-4o-mini",
+          "status" => "active"
+        }
+      }
+    }
+  end
+
+  defp single_prompt do
+    %{
+      "schema_version" => 1,
+      "project" => "helpdesk",
+      "environment" => "production",
+      "prompt" => %{
+        "key" => "support_reply",
+        "kind" => "chat",
+        "variables" => [%{"name" => "question", "type" => "string", "required" => true}],
+        "default_params" => %{"temperature" => 0.5}
+      },
+      "deployment" => %{
+        "revision" => "v2026.09.30-3",
+        "provider" => "openrouter",
+        "model" => "openai/gpt-4o-mini",
+        "prompt_version" => 2,
+        "params" => %{"temperature" => 0.3}
+      },
+      "prompt_version" => %{
+        "prompt" => "support_reply",
+        "number" => 2,
+        "kind" => "chat",
+        "engine" => "liquid",
+        "messages" => [%{"role" => "user", "content" => "{{ question }}"}]
+      },
+      "model" => %{
+        "provider" => "openrouter",
+        "model" => "openai/gpt-4o-mini",
+        "status" => "active"
+      }
+    }
   end
 end

@@ -133,7 +133,7 @@ defmodule PromptOnSDK do
   @doc """
   Prepare the deployed provider request. Returns its explicit API, POST method, origin-relative
   path, and rendered JSON body. The application supplies provider credentials and sends it.
-  Schema v5 snapshots remain readable but return `{:error, :missing_request_metadata}` here.
+  Prompt snapshots must use schema v1 readable resource references.
   `opts` supports `template:`, `params:`, and `provider_options:` overrides. Decisions also accept
   `session_id:`, `trace:`, and `user:` metadata. Protected body fields cannot be overridden.
   """

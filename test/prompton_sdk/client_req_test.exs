@@ -66,7 +66,7 @@ defmodule PromptOnSDK.Client.ReqTest do
     assert req.options[:decode_body] == false
   end
 
-  test "fetch_prompts remains the explicit full-document export endpoint" do
+  test "fetch_prompts remains the explicit export discovery endpoint" do
     test_pid = self()
 
     adapter = fn req ->

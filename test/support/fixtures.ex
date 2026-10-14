@@ -65,18 +65,18 @@ Append these new voice transcriptions:
   @doc "The diary_generation user template template."
   def diary_user_template, do: @diary_user_template
 
-  @doc "The reference snapshot (string-keyed map, schema v5)."
+  @doc "The reference snapshot (string-keyed map, schema v1)."
   @spec snapshot() :: map()
   def snapshot do
     %{
-      "schema_version" => 5,
+      "schema_version" => 1,
       "project" => "heydiary",
       "environment" => "production",
       "prompts" => %{
         "diary_generation" => %{
           "id" => id(:uc_diary),
           "kind" => "chat",
-          "input_schema" => [
+          "variables" => [
             %{"name" => "transcriptions", "type" => "list", "required" => true},
             %{"name" => "mode", "type" => "string", "required" => true},
             %{"name" => "existing_diary", "type" => "string", "required" => false},
@@ -92,14 +92,14 @@ Append these new voice transcriptions:
         "chat_response" => %{
           "id" => id(:uc_chat),
           "kind" => "chat",
-          "input_schema" => [%{"name" => "tone", "type" => "string", "required" => false}],
+          "variables" => [%{"name" => "tone", "type" => "string", "required" => false}],
           "default_params" => %{"temperature" => 0.7},
           "payload_policy" => nil
         },
         "voice_transcription" => %{
           "id" => id(:uc_stt),
           "kind" => "text",
-          "input_schema" => [],
+          "variables" => [],
           "default_params" => %{},
           "payload_policy" => %{
             "mode" => "hash",
@@ -110,14 +110,14 @@ Append these new voice transcriptions:
         "diary_embedding" => %{
           "id" => id(:uc_embed),
           "kind" => "embedding",
-          "input_schema" => [],
+          "variables" => [],
           "default_params" => %{},
           "payload_policy" => %{"mode" => "none", "sample_rate" => 1.0, "max_bytes" => 262_144}
         },
         "transcript_revision" => %{
           "id" => id(:uc_revision),
           "kind" => "chat",
-          "input_schema" => [],
+          "variables" => [],
           "default_params" => %{},
           "payload_policy" => nil
         }
@@ -268,6 +268,76 @@ Append these new voice transcriptions:
         }
       }
     }
+    |> readable_schema1()
+  end
+
+  defp readable_schema1(raw) do
+    version_to_prompt =
+      raw["deployments"]
+      |> Enum.flat_map(fn {prompt_key, deployment} ->
+        case get_in(deployment, ["template_pins", "default"]) do
+          nil -> []
+          version_id -> [{version_id, prompt_key}]
+        end
+      end)
+      |> Map.new()
+
+    models =
+      Map.new(raw["models"], fn {_id, model} ->
+        provider = model["provider"]
+        model_name = model["model_id"]
+
+        {"#{provider}:#{model_name}",
+         model |> Map.delete("id") |> Map.put("model", model_name) |> Map.delete("model_id")}
+      end)
+
+    deployments =
+      raw["deployments"]
+      |> Enum.map(fn {key, deployment} ->
+        model = raw["models"][deployment["model_id"]]
+        version_id = get_in(deployment, ["template_pins", "default"])
+        version = raw["prompt_versions"][version_id]
+
+        if version do
+          {key,
+           deployment
+           |> Map.drop(["id", "model_id", "template_pins"])
+           |> Map.put("provider", model["provider"])
+           |> Map.put("model", model["model_id"])
+           |> Map.put("prompt_version", version["number"])}
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
+      |> Map.new()
+
+    prompt_versions =
+      raw["prompt_versions"]
+      |> Enum.flat_map(fn {id, version} ->
+        case version_to_prompt[id] do
+          nil ->
+            []
+
+          prompt_key ->
+            key = "#{prompt_key}@#{version["number"]}"
+
+            [
+              {key,
+               version
+               |> Map.drop(["id", "prompt_template_id"])
+               |> Map.put("prompt", prompt_key)
+               |> Map.put_new("kind", raw["prompts"][prompt_key]["kind"])}
+            ]
+        end
+      end)
+      |> Map.new()
+
+    prompts = Map.new(raw["prompts"], fn {key, prompt} -> {key, Map.delete(prompt, "id")} end)
+
+    raw
+    |> Map.put("prompts", prompts)
+    |> Map.put("deployments", deployments)
+    |> Map.put("prompt_versions", prompt_versions)
+    |> Map.put("models", models)
   end
 
   @doc "The decoded prompt document."

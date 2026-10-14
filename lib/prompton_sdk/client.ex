@@ -12,8 +12,8 @@ defmodule PromptOnSDK.Client do
     `{:ok, %{status: 304}}` | `{:ok, %{status: other, body: term}}` | `{:error, term}`.
     `body` is the **raw bytes** (written to the disk cache as is); if a map is returned, the SDK
     re-serializes it. `opts[:receive_timeout]` is the timeout for this request only.
-  * `fetch_prompts/3`: legacy full-document fetch used by explicit export/bundle tooling. Runtime
-    prompt resolution does not fall back to it.
+  * `fetch_prompts/3`: fetches the lightweight prompt discovery list used by explicit
+    export/bundle tooling. Runtime prompt resolution does not fall back to it.
   * `post_logs/2`, `post_feedback/2`, `post_events/2`:
     `{:ok, %{status: integer, body: map | binary, headers: map}}` | `{:error, term}`.
     `headers` is a map with lowercase keys (see `"retry-after"`).

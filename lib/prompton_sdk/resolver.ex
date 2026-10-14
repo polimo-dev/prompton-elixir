@@ -91,7 +91,7 @@ defmodule PromptOnSDK.Resolver do
       messages: template_messages(kind, prompt_version),
       tools: template_tools(prompt_version),
       text_template: template_text(kind, prompt_version),
-      input_schema: prompt.input_schema,
+      variables: prompt.variables,
       source: Keyword.get(opts, :source, :remote),
       etag: Keyword.get(opts, :etag),
       payload_policy: prompt.payload_policy,
@@ -99,12 +99,9 @@ defmodule PromptOnSDK.Resolver do
     }
   end
 
-  defp legacy_resource_id(%{schema_version: version}, _resource) when version >= 8, do: nil
-  defp legacy_resource_id(_snapshot, %{id: id}), do: id
   defp legacy_resource_id(_snapshot, _resource), do: nil
 
   defp serving_kind(_snapshot, _prompt, %{kind: kind}) when not is_nil(kind), do: kind
-  defp serving_kind(%{schema_version: 5}, prompt, _version), do: prompt.kind
   defp serving_kind(_snapshot, %{kind: :embedding}, _version), do: :embedding
   defp serving_kind(_snapshot, _prompt, _version), do: nil
 

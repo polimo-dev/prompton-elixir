@@ -37,7 +37,7 @@ defmodule PromptOnSDK.Prompt do
           tools: map() | nil,
           text_template: String.t() | nil,
           source: atom(),
-          input_schema: [map()],
+          variables: [map()],
           payload_policy: map() | nil,
           warnings: [term()],
           etag: String.t() | nil
@@ -62,7 +62,7 @@ defmodule PromptOnSDK.Prompt do
             tools: nil,
             text_template: nil,
             source: :remote,
-            input_schema: [],
+            variables: [],
             payload_policy: nil,
             warnings: [],
             etag: nil
@@ -90,7 +90,7 @@ defmodule PromptOnSDK.Prompt do
       tools: Map.get(r, :tools),
       text_template: r.text_template,
       source: r.source,
-      input_schema: r.input_schema,
+      variables: r.variables,
       payload_policy: r.payload_policy,
       warnings: r.warnings,
       etag: r.etag
@@ -230,7 +230,7 @@ defmodule PromptOnSDK.Prompt do
       messages: prompt.messages,
       tools: prompt.tools,
       text_template: prompt.text_template,
-      input_schema: prompt.input_schema,
+      variables: prompt.variables,
       source: prompt.source,
       etag: prompt.etag,
       payload_policy: prompt.payload_policy,

@@ -16,7 +16,7 @@ defmodule PromptOnSDK.ResolverTest do
 
   defp readable_snapshot do
     %{
-      "schema_version" => 8,
+      "schema_version" => 1,
       "project" => "helpdesk",
       "environment" => "production",
       "prompts" => %{
@@ -70,31 +70,13 @@ defmodule PromptOnSDK.ResolverTest do
       assert {:ok, r} = Resolver.resolve(snapshot, "diary_generation")
 
       assert r.template == "default"
-      assert r.prompt_version_id == Fixtures.id(:pv_en)
+      assert r.prompt_version_id == nil
       assert r.prompt_version_number == 2
-      assert r.deployment_id == Fixtures.id(:d_diary)
+      assert r.deployment_id == nil
       assert r.deployment_revision == "v2026.09.30-4"
 
       assert [%{role: "system", content: "You write diaries from voice transcriptions."} | _] =
                r.messages
-    end
-
-    test ":template selects the named pin (this is how language branching works now)", %{
-      snapshot: snapshot
-    } do
-      assert {:ok, r} = Resolver.resolve(snapshot, "diary_generation", template: "ko")
-
-      assert r.template == "ko"
-      assert r.prompt_version_id == Fixtures.id(:pv_ko)
-      assert r.prompt_version_number == 3
-
-      assert [%{content: "You write diaries from voice transcriptions, in Korean."} | _] =
-               r.messages
-    end
-
-    test "an atom template name is accepted", %{snapshot: snapshot} do
-      assert {:ok, r} = Resolver.resolve(snapshot, :diary_generation, template: :ko)
-      assert r.template == "ko"
     end
 
     test "a name the deployment does not pin is an error, never a silent default", %{
@@ -108,7 +90,7 @@ defmodule PromptOnSDK.ResolverTest do
     end
 
     test "template_names/2 lists the pinned names", %{snapshot: snapshot} do
-      assert {:ok, ["default", "ko"]} = Resolver.template_names(snapshot, "diary_generation")
+      assert {:ok, ["default"]} = Resolver.template_names(snapshot, "diary_generation")
       assert {:ok, ["default"]} = Resolver.template_names(snapshot, "chat_response")
       assert {:ok, []} = Resolver.template_names(snapshot, "diary_embedding")
       assert {:ok, []} = Resolver.template_names(snapshot, "transcript_revision")
@@ -116,7 +98,7 @@ defmodule PromptOnSDK.ResolverTest do
     end
   end
 
-  describe "schema v8 readable resources" do
+  describe "schema v1 readable resources" do
     test "resolves readable model and prompt-version keys with nil legacy ids" do
       assert {:ok, snapshot, []} = PromptDocument.decode(readable_snapshot())
       assert {:ok, r} = Resolver.resolve(snapshot, "support_reply", source: :bundle)
@@ -170,15 +152,8 @@ defmodule PromptOnSDK.ResolverTest do
       assert r.engine == :raw
     end
 
-    test "embedding prompt has no template at all and ignores :template", %{snapshot: snapshot} do
-      assert {:ok, r} = Resolver.resolve(snapshot, "diary_embedding", template: "ko")
-
-      assert r.kind == :embedding
-      assert r.template == nil
-      assert r.prompt_version_id == nil
-      assert r.messages == nil
-      assert r.text_template == nil
-      assert r.model == "text-embedding-3-small"
+    test "embedding prompt without a deployment is unresolved", %{snapshot: snapshot} do
+      assert {:error, :unresolved} = Resolver.resolve(snapshot, "diary_embedding", template: "ko")
     end
   end
 
@@ -197,7 +172,7 @@ defmodule PromptOnSDK.ResolverTest do
              }
 
       assert r.model == "anthropic/claude-sonnet-4"
-      assert r.model_id == Fixtures.id(:m_sonnet4)
+      assert r.model_id == nil
       assert r.provider == :openrouter
     end
 
@@ -218,31 +193,26 @@ defmodule PromptOnSDK.ResolverTest do
       assert {:error, :unresolved} = Resolver.resolve(snapshot, "transcript_revision")
     end
 
-    test "a pin pointing at a missing template version warns and leaves the field nil" do
+    test "a deployment pointing at a missing prompt version is rejected at decode" do
       snapshot =
         Fixtures.snapshot()
-        |> update_in(["prompt_versions"], &Map.delete(&1, Fixtures.id(:pv_en)))
+        |> update_in(["prompt_versions"], &Map.delete(&1, "diary_generation@2"))
 
-      {:ok, data, _} = PromptDocument.decode(snapshot)
+      assert {:error, {:invalid_prompt_document, message}} = PromptDocument.decode(snapshot)
 
-      assert {:ok, r} = Resolver.resolve(data, "diary_generation")
-      assert r.prompt_version_id == nil
-      assert r.messages == nil
-      assert r.warnings == [{:missing_prompt_version, Fixtures.id(:pv_en)}]
+      assert message =~
+               "deployment diary_generation references missing prompt version diary_generation@2"
     end
 
-    test "a deployment pointing at a missing model warns and leaves the field nil" do
+    test "a deployment pointing at a missing model is rejected at decode" do
       snapshot =
-        Fixtures.snapshot() |> update_in(["models"], &Map.delete(&1, Fixtures.id(:m_sonnet4)))
+        Fixtures.snapshot()
+        |> update_in(["models"], &Map.delete(&1, "openrouter:anthropic/claude-sonnet-4"))
 
-      {:ok, data, _} = PromptDocument.decode(snapshot)
+      assert {:error, {:invalid_prompt_document, message}} = PromptDocument.decode(snapshot)
 
-      assert {:ok, r} = Resolver.resolve(data, "diary_generation")
-      assert r.model == nil
-      assert r.model_id == nil
-      assert r.warnings == [{:missing_model, Fixtures.id(:m_sonnet4)}]
-      # Prompt defaults are kept even when the model is missing
-      assert r.params == %{"temperature" => 0.4}
+      assert message =~
+               "deployment diary_generation references missing model openrouter:anthropic/claude-sonnet-4"
     end
   end
 
@@ -262,7 +232,7 @@ defmodule PromptOnSDK.ResolverTest do
       assert r.source == :remote
       assert r.payload_policy.mode == :full
 
-      assert r.input_schema |> Enum.map(& &1.name) |> Enum.sort() ==
+      assert r.variables |> Enum.map(& &1.name) |> Enum.sort() ==
                ~w(existing_diary mode transcriptions user_content)
     end
   end

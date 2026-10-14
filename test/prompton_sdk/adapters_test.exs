@@ -11,7 +11,7 @@ defmodule PromptOnSDK.AdaptersTest do
 
   describe "OpenRouter.request_body/3" do
     test "assembles model/messages/params/provider and usage.include" do
-      r = resolve("diary_generation", template: "ko")
+      r = resolve("diary_generation")
       msgs = [%{"role" => "user", "content" => "hi"}]
       body = OpenRouter.request_body(r, msgs, %{"max_tokens" => 2048})
 

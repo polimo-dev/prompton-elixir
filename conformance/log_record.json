@@ -48,7 +48,7 @@
           "provider": "openrouter",
           "sdk": {
             "name": "prompton_sdk",
-            "version": "0.5.0"
+            "version": "0.8.0"
           },
           "sequence": 1,
           "source": "remote",
@@ -107,7 +107,7 @@
           "provider": "openrouter",
           "sdk": {
             "name": "prompton_sdk",
-            "version": "0.5.0"
+            "version": "0.8.0"
           },
           "sequence": 2,
           "source": "remote",
@@ -163,7 +163,7 @@
           "provider": "openrouter",
           "sdk": {
             "name": "prompton_sdk",
-            "version": "0.5.0"
+            "version": "0.8.0"
           },
           "source": "remote",
           "started_at": "2026-09-04T09:00:00.000000Z",
@@ -201,7 +201,7 @@
           "provider": "openrouter",
           "sdk": {
             "name": "prompton_sdk",
-            "version": "0.5.0"
+            "version": "0.8.0"
           },
           "source": "disk",
           "started_at": "2026-09-04T09:00:00.000000Z",
@@ -233,7 +233,7 @@
           "provider": "openrouter",
           "sdk": {
             "name": "prompton_sdk",
-            "version": "0.5.0"
+            "version": "0.8.0"
           },
           "source": "bundle",
           "started_at": "2026-09-04T09:00:00.000000Z",
@@ -305,11 +305,11 @@
   },
   "format_version": 1,
   "generated_from": {
-    "commit": "61205451b1b14e9a09cdadfcf8e79622ab0700db",
+    "commit": "981ede83ec76119ff43547c34b1e020ee75fbbf0",
     "language": "elixir",
     "repo": "https://github.com/polimo-dev/prompton-elixir",
     "sdk": "prompton_sdk",
-    "sdk_version": "0.5.0"
+    "sdk_version": "0.8.0"
   },
   "records": [
     {
@@ -361,7 +361,7 @@
         "provider": "openrouter",
         "sdk": {
           "name": "prompton_sdk",
-          "version": "0.5.0"
+          "version": "0.8.0"
         },
         "sequence": 1,
         "source": "remote",
@@ -425,7 +425,7 @@
         "provider": "openrouter",
         "sdk": {
           "name": "prompton_sdk",
-          "version": "0.5.0"
+          "version": "0.8.0"
         },
         "sequence": 2,
         "source": "remote",
@@ -486,7 +486,7 @@
         "provider": "openrouter",
         "sdk": {
           "name": "prompton_sdk",
-          "version": "0.5.0"
+          "version": "0.8.0"
         },
         "source": "remote",
         "started_at": "2026-09-04T09:00:00.000000Z",
@@ -529,7 +529,7 @@
         "provider": "openrouter",
         "sdk": {
           "name": "prompton_sdk",
-          "version": "0.5.0"
+          "version": "0.8.0"
         },
         "source": "disk",
         "started_at": "2026-09-04T09:00:00.000000Z",
@@ -566,7 +566,7 @@
         "provider": "openrouter",
         "sdk": {
           "name": "prompton_sdk",
-          "version": "0.5.0"
+          "version": "0.8.0"
         },
         "source": "bundle",
         "started_at": "2026-09-04T09:00:00.000000Z",

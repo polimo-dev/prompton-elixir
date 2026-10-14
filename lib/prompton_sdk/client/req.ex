@@ -8,7 +8,8 @@ defmodule PromptOnSDK.Client.Req do
   * Runtime prompt resolution uses `GET /prompts/:key?environment=<slug>`, sends per-prompt
     `If-None-Match`, and does **not decode the body**
     (`decode_body: false`): the ETag is a hash of the body bytes, so the raw body is stored in the
-    SDK cache unchanged. `fetch_prompts/3` remains available for explicit bundle export.
+    SDK cache unchanged. `fetch_prompts/3` remains available for explicit bundle export by
+    reading the lightweight prompt discovery list.
   * `POST /logs?environment=<slug>` sends generation logs as `{"logs": [...]}` and trace
     events as `{"logs": [], "events": [...]}`. `POST /feedback` sends `{"feedback": [...]}` JSON.
   """

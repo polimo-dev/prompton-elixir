@@ -22,18 +22,18 @@ defmodule PromptOnSDK.APITest do
     test "prompt sets source/etag from the store and emits telemetry" do
       attach_telemetry([@prompt_stop])
 
-      assert {:ok, %Prompt{} = r} = PromptOnSDK.prompt(:diary_generation, template: "ko")
+      assert {:ok, %Prompt{} = r} = PromptOnSDK.prompt(:diary_generation)
 
       assert r.source == :manual
       assert r.etag == "test"
-      assert r.template == "ko"
-      assert r.prompt_version.id == Fixtures.id(:pv_ko)
+      assert r.template == "default"
+      assert r.prompt_version.id == nil
 
       assert_receive {:telemetry, @prompt_stop, %{duration: _},
                       %{
                         prompt_key: "diary_generation",
                         source: :manual,
-                        template: "ko",
+                        template: "default",
                         result: :ok
                       }}
     end
@@ -129,7 +129,7 @@ defmodule PromptOnSDK.APITest do
     end
 
     test "template_names/1 lists what the live deployment pins" do
-      assert PromptOnSDK.template_names("diary_generation") == {:ok, ["default", "ko"]}
+      assert PromptOnSDK.template_names("diary_generation") == {:ok, ["default"]}
       assert PromptOnSDK.template_names("nope") == {:error, :unknown_prompt}
 
       PromptOnSDK.Test.clear()
@@ -158,24 +158,18 @@ defmodule PromptOnSDK.APITest do
       {:ok, stt} = PromptOnSDK.prompt("voice_transcription")
       assert PromptOnSDK.text(stt, %{}) == {:ok, "Hello. Today's diary {{ verbatim }}"}
 
-      {:ok, emb} = PromptOnSDK.prompt("diary_embedding")
-      assert PromptOnSDK.messages(emb, %{}) == {:error, :wrong_kind}
+      assert PromptOnSDK.prompt("diary_embedding") == {:error, :unresolved}
     end
 
-    test "messages/3 and text/3 accept template: and never silently fall back" do
+    test "messages/3 and text/3 accept only deployed template pins" do
       {:ok, r} = PromptOnSDK.prompt("diary_generation")
 
       assert r.template == "default"
 
-      assert {:ok,
-              [
-                %{
-                  role: "system",
-                  content: "You write diaries from voice transcriptions, in Korean."
-                },
-                %{role: "user", content: user}
-              ]} =
-               PromptOnSDK.messages(r, %{transcriptions: ["안녕"], mode: "fresh"}, template: "ko")
+      assert {:ok, [%{role: "system"}, %{role: "user", content: user}]} =
+               PromptOnSDK.messages(r, %{transcriptions: ["안녕"], mode: "fresh"},
+                 template: "default"
+               )
 
       assert user =~ "1. 안녕"
 
@@ -193,7 +187,7 @@ defmodule PromptOnSDK.APITest do
 
   describe "track/3 (test mode → caller mailbox)" do
     setup do
-      {:ok, r} = PromptOnSDK.prompt("diary_generation", template: "ko")
+      {:ok, r} = PromptOnSDK.prompt("diary_generation")
       %{r: r}
     end
 
@@ -240,9 +234,9 @@ defmodule PromptOnSDK.APITest do
       refute Map.has_key?(gen, "deployment_id")
       refute Map.has_key?(gen, "model_id")
       assert gen["deployment_revision"] == "v2026.09.30-4"
-      assert gen["template"] == "ko"
+      assert gen["template"] == "default"
       refute Map.has_key?(gen, "prompt_version_id")
-      assert gen["prompt_version_number"] == 3
+      assert gen["prompt_version_number"] == 2
       refute Map.has_key?(gen, "target_id")
       refute Map.has_key?(gen, "rule_id")
       refute Map.has_key?(gen, "variant_id")
@@ -290,8 +284,8 @@ defmodule PromptOnSDK.APITest do
                  "status" => "ok",
                  "deployment_id" => Fixtures.id(:d_diary),
                  "deployment_revision" => "v2026.09.30-4",
-                 "prompt_version_id" => Fixtures.id(:pv_ko),
-                 "prompt_version_number" => 3,
+                 "prompt_version_id" => nil,
+                 "prompt_version_number" => 2,
                  "model_id" => Fixtures.id(:m_sonnet4)
                })
 
@@ -300,27 +294,27 @@ defmodule PromptOnSDK.APITest do
       refute Map.has_key?(gen, "prompt_version_id")
       refute Map.has_key?(gen, "model_id")
       assert gen["deployment_revision"] == "v2026.09.30-4"
-      assert gen["prompt_version_number"] == 3
+      assert gen["prompt_version_number"] == 2
     end
 
     test "track/3 can derive the same named template as messages/3 from template meta" do
       {:ok, default_template} = PromptOnSDK.prompt("diary_generation")
 
-      assert {:ok, [%{content: "You write diaries from voice transcriptions, in Korean."}, _]} =
-               PromptOnSDK.messages(
-                 default_template,
-                 %{transcriptions: ["a"], mode: "fresh"},
-                 template: "ko"
-               )
+      assert {:ok, [%{content: "You write diaries from voice transcriptions."}, _]} =
+               PromptOnSDK.messages(default_template, %{transcriptions: ["a"], mode: "fresh"})
 
       assert {:ok, _result} =
-               PromptOnSDK.track(default_template, %{id: "ko-derived", template: "ko"}, fn ->
-                 {:ok, Result.from_openai(@or_resp)}
-               end)
+               PromptOnSDK.track(
+                 default_template,
+                 %{id: "default-derived", template: "default"},
+                 fn ->
+                   {:ok, Result.from_openai(@or_resp)}
+                 end
+               )
 
-      gen = assert_logged(%{"id" => "ko-derived"})
-      assert gen["template"] == "ko"
-      assert gen["prompt_version_number"] == 3
+      gen = assert_logged(%{"id" => "default-derived"})
+      assert gen["template"] == "default"
+      assert gen["prompt_version_number"] == 2
       refute Map.has_key?(gen, "prompt_version_id")
 
       refute get_in(gen, ["metadata", "template"])
@@ -333,32 +327,28 @@ defmodule PromptOnSDK.APITest do
       {:ok, default_template} = PromptOnSDK.prompt("diary_generation")
 
       assert {:ok, msgs} =
-               PromptOnSDK.messages(
-                 default_template,
-                 %{transcriptions: ["a"], mode: "fresh"},
-                 template: "ko"
-               )
+               PromptOnSDK.messages(default_template, %{transcriptions: ["a"], mode: "fresh"})
 
       assert {:ok, _result} =
                PromptOnSDK.track(
                  default_template,
-                 %{id: "ko-auto", input_messages: msgs},
+                 %{id: "default-auto", input_messages: msgs},
                  fn -> {:ok, Result.from_openai(@or_resp)} end
                )
 
-      gen = assert_logged(%{"id" => "ko-auto"})
-      assert gen["template"] == "ko"
-      assert gen["prompt_version_number"] == 3
+      gen = assert_logged(%{"id" => "default-auto"})
+      assert gen["template"] == "default"
+      assert gen["prompt_version_number"] == 2
       refute Map.has_key?(gen, "prompt_version_id")
 
       assert {:ok, _result} =
-               PromptOnSDK.track(r, %{id: "default-after-ko"}, fn ->
+               PromptOnSDK.track(r, %{id: "default-after-render"}, fn ->
                  {:ok, Result.from_openai(@or_resp)}
                end)
 
-      gen = assert_logged(%{"id" => "default-after-ko"})
-      assert gen["template"] == "ko"
-      assert gen["prompt_version_number"] == 3
+      gen = assert_logged(%{"id" => "default-after-render"})
+      assert gen["template"] == "default"
+      assert gen["prompt_version_number"] == 2
       refute Map.has_key?(gen, "prompt_version_id")
 
       assert {:ok, _result} =
@@ -497,21 +487,8 @@ defmodule PromptOnSDK.APITest do
       assert gen["usage"]["input_tokens"] == 1
     end
 
-    test "payload policy from the prompt is applied (embedding = none)", %{r: _} do
-      {:ok, emb} = PromptOnSDK.prompt("diary_embedding")
-
-      PromptOnSDK.track(
-        emb,
-        %{input_messages: [%{"role" => "user", "content" => "secret"}]},
-        fn ->
-          {:ok, %{content: "vec", usage: %{input_tokens: 5, output_tokens: 0}}}
-        end
-      )
-
-      gen = assert_logged(%{"prompt_key" => "diary_embedding"})
-      refute Map.has_key?(gen, "input")
-      refute Map.has_key?(gen, "output")
-      assert gen["usage"]["input_tokens"] == 5
+    test "payload policy from an unresolved embedding prompt is not applied", %{r: _} do
+      assert PromptOnSDK.prompt("diary_embedding") == {:error, :unresolved}
     end
   end
 
@@ -864,8 +841,7 @@ defmodule PromptOnSDK.APITest do
       assert stt.provider == :groq and stt.kind == :text
       assert PromptOnSDK.text(stt, %{}) == {:ok, "hint"}
 
-      {:ok, emb} = PromptOnSDK.prompt("diary_embedding", %{})
-      assert emb.kind == :embedding and emb.payload_policy.mode == :none
+      assert PromptOnSDK.prompt("diary_embedding", %{}) == {:error, :unresolved}
 
       PromptOnSDK.track(r, %{}, fn -> {:ok, %{content: "out"}} end)
       assert_logged(%{"prompt_key" => "diary_generation", "output" => %{"content" => "out"}}, 100)

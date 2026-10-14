@@ -1,17 +1,16 @@
 defmodule PromptOnSDK.PromptDocument do
   @moduledoc """
-  Decodes `GET /prompts` and `GET /prompts/:key` responses into the SDK's prompt document structure.
+  Decodes schema v1 prompt configuration responses into the SDK's prompt document structure.
 
-  The SDK reads **schema v9, schema v8, schema v7, schema v6, and legacy v5**. Prepared requests require v6+
-  metadata. A document contains deployed prompts, their deployments,
-  pinned template versions, and model records. The decoded value is consumed by
-  `PromptOnSDK.prompt/2` and by test helpers.
+  Runtime HTTP fetches use the singular `GET /prompts/:key` detail shape. Offline bundles may
+  aggregate those details into keyed maps. The lightweight `GET /prompts` discovery list is not a
+  loadable configuration.
 
   Atom-keyed maps are accepted for hand-written tests, but server responses and bundle files are
   expected to be JSON/string-keyed maps.
   """
 
-  @schema_version 9
+  @schema_version 1
   @kinds ~w(chat decision text embedding)
   @apis ~w(chat_completions decisions)
   @engines ~w(liquid raw)
@@ -27,7 +26,7 @@ defmodule PromptOnSDK.PromptDocument do
 
   @atom_keys ~w(
     api capabilities content context_length decision default_params deployments description display_name encrypt
-    encrypt? engine environment example id input_schema kind max_bytes messages metadata mode
+    encrypt? engine environment example id variables kind max_bytes messages metadata mode
     model model_id models name number output_examples output_schema parallel_tool_calls params payload_policy
     pricing project prompt prompt_template_id prompt_version template_pins prompt_versions provider provider_options required
     required? retention_days revision role request_path sample_rate schema_version status text_template
@@ -53,7 +52,7 @@ defmodule PromptOnSDK.PromptDocument do
           id: String.t() | nil,
           key: String.t(),
           kind: atom(),
-          input_schema: [map()],
+          variables: [map()],
           default_params: map(),
           payload_policy: map() | nil,
           deployment: deployment() | nil
@@ -122,16 +121,16 @@ defmodule PromptOnSDK.PromptDocument do
 
   def decode(map) when is_map(map) do
     with {:ok, version, warnings} <- schema_version(map),
-         {:ok, map} <- normalize_schema9_single_prompt(map, version),
+         {:ok, map} <- normalize_schema1_shape(map),
          {:ok, prompts_raw} <- fetch_map(map, "prompts"),
-         :ok <- validate_schema8_references(map, version) do
+         :ok <- validate_schema1_references(map) do
       {prompts, warnings} = decode_prompts(prompts_raw, warnings)
-      {deployments, warnings} = decode_deployments(get(map, "deployments"), version, warnings)
+      {deployments, warnings} = decode_deployments(get(map, "deployments"), warnings)
 
       {prompt_versions, warnings} =
         decode_by_id(
           get(map, "prompt_versions"),
-          &decode_prompt_version(&1, version, &2),
+          &decode_prompt_version(&1, &2),
           warnings
         )
 
@@ -166,8 +165,7 @@ defmodule PromptOnSDK.PromptDocument do
 
   defp schema_version(map), do: check_schema_version(get(map, "schema_version"))
 
-  defp check_schema_version(version) when version in [5, 6, 7, 8, @schema_version],
-    do: {:ok, version, []}
+  defp check_schema_version(@schema_version), do: {:ok, @schema_version, []}
 
   defp check_schema_version(v) when is_integer(v) and v > 0,
     do: {:error, {:unsupported_schema_version, v}}
@@ -185,6 +183,11 @@ defmodule PromptOnSDK.PromptDocument do
     case get(map, key) do
       v when is_map(v) ->
         {:ok, v}
+
+      v when key == "prompts" and is_list(v) ->
+        {:error,
+         {:invalid_prompt_document,
+          "prompt list responses are discovery-only and cannot be loaded as configuration"}}
 
       nil ->
         {:error, {:invalid_prompt_document, "#{key} is required"}}
@@ -214,14 +217,14 @@ defmodule PromptOnSDK.PromptDocument do
 
   defp decode_prompt(key, raw, warnings) do
     {kind, warnings} = to_enum(get(raw, "kind"), @kinds, :chat, :unknown_kind, warnings)
-    {input_schema, warnings} = decode_input_schema(get(raw, "input_schema"), warnings)
+    {variables, warnings} = decode_variables(get(raw, "variables"), warnings)
     {payload_policy, warnings} = decode_payload_policy(get(raw, "payload_policy"), warnings)
 
     prompt = %{
-      id: to_str(get(raw, "id")),
+      id: nil,
       key: key,
       kind: kind,
-      input_schema: input_schema,
+      variables: variables,
       default_params: to_string_key_map(get(raw, "default_params")),
       payload_policy: payload_policy,
       deployment: nil
@@ -240,7 +243,7 @@ defmodule PromptOnSDK.PromptDocument do
     end)
   end
 
-  defp decode_input_schema(list, warnings) when is_list(list) do
+  defp decode_variables(list, warnings) when is_list(list) do
     Enum.map_reduce(list, warnings, fn
       var, warnings when is_map(var) ->
         {type, warnings} =
@@ -260,7 +263,7 @@ defmodule PromptOnSDK.PromptDocument do
     |> then(fn {vars, warnings} -> {Enum.reject(vars, &is_nil/1), warnings} end)
   end
 
-  defp decode_input_schema(_, warnings), do: {[], warnings}
+  defp decode_variables(_, warnings), do: {[], warnings}
 
   defp decode_payload_policy(nil, warnings), do: {nil, warnings}
 
@@ -281,18 +284,31 @@ defmodule PromptOnSDK.PromptDocument do
     do: {nil, [{:invalid_payload_policy, other} | warnings]}
 
   # ---------------------------------------------------------------------------
-  # schema v9 single-prompt envelope
+  # schema v1 shape and readable-reference validation
 
-  defp normalize_schema9_single_prompt(map, version) when version != 9, do: {:ok, map}
+  defp normalize_schema1_shape(map) do
+    cond do
+      Enum.any?(~w(prompt deployment prompt_version model), &has_key?(map, &1)) ->
+        normalize_schema1_single_prompt(map)
 
-  defp normalize_schema9_single_prompt(map, 9) do
-    with :ok <- reject_schema9_mixed_shape(map),
+      match?(v when is_list(v), get(map, "prompts")) ->
+        {:error,
+         {:invalid_prompt_document,
+          "prompt list responses are discovery-only and cannot be loaded as configuration"}}
+
+      true ->
+        {:ok, map}
+    end
+  end
+
+  defp normalize_schema1_single_prompt(map) do
+    with :ok <- reject_schema1_mixed_shape(map),
          {:ok, prompt} <- required_object(map, "prompt"),
          {:ok, deployment} <- required_object(map, "deployment"),
          {:ok, prompt_version} <- required_object(map, "prompt_version"),
          {:ok, model} <- required_object(map, "model"),
          {:ok, key} <- required_string(get(prompt, "key"), "prompt.key"),
-         :ok <- validate_schema9_identity(key, deployment, prompt_version, model) do
+         :ok <- validate_schema1_identity(key, deployment, prompt_version, model) do
       normalized =
         map
         |> Map.delete("prompt")
@@ -314,18 +330,18 @@ defmodule PromptOnSDK.PromptDocument do
     end
   end
 
-  defp reject_schema9_mixed_shape(map) do
+  defp reject_schema1_mixed_shape(map) do
     Enum.find_value(~w(prompts deployments prompt_versions models), :ok, fn key ->
       if has_key?(map, key) do
         {:error,
-         {:invalid_prompt_document, "schema 9 single prompt document must not include #{key}"}}
+         {:invalid_prompt_document, "schema 1 single prompt document must not include #{key}"}}
       else
         false
       end
     end)
   end
 
-  defp validate_schema9_identity(key, deployment, prompt_version, model) do
+  defp validate_schema1_identity(key, deployment, prompt_version, model) do
     with {:ok, version_prompt} <-
            required_string(get(prompt_version, "prompt"), "prompt_version.prompt"),
          :ok <-
@@ -348,14 +364,12 @@ defmodule PromptOnSDK.PromptDocument do
            required_string(get(deployment, "provider"), "deployment.provider"),
          {:ok, deployment_model} <- required_string(get(deployment, "model"), "deployment.model"),
          {:ok, model_provider} <- required_string(get(model, "provider"), "model.provider"),
-         {:ok, model_name} <- required_string(get(model, "model"), "model.model"),
-         :ok <-
-           require_equal_value(
-             {deployment_provider, deployment_model},
-             {model_provider, model_name},
-             "deployment provider/model #{deployment_provider}:#{deployment_model} must match model #{model_provider}:#{model_name}"
-           ) do
-      :ok
+         {:ok, model_name} <- required_string(get(model, "model"), "model.model") do
+      require_equal_value(
+        {deployment_provider, deployment_model},
+        {model_provider, model_name},
+        "deployment provider/model #{deployment_provider}:#{deployment_model} must match model #{model_provider}:#{model_name}"
+      )
     end
   end
 
@@ -377,38 +391,33 @@ defmodule PromptOnSDK.PromptDocument do
   defp require_equal_value(_left, _right, message),
     do: {:error, {:invalid_prompt_document, message}}
 
-  # schema v8/v9 validation
-
-  defp validate_schema8_references(_map, version) when version < 8, do: :ok
-
-  defp validate_schema8_references(map, _version) do
-    with {:ok, deployments} <- optional_object(map, "deployments"),
-         {:ok, prompt_versions} <- optional_object(map, "prompt_versions"),
-         {:ok, models} <- optional_object(map, "models"),
-         :ok <- validate_schema8_prompt_versions(prompt_versions || %{}),
-         :ok <- validate_schema8_models(models || %{}) do
-      validate_schema8_deployments(deployments || %{}, prompt_versions || %{}, models || %{})
+  defp validate_schema1_references(map) do
+    with {:ok, deployments} <- required_collection_map(map, "deployments"),
+         {:ok, prompt_versions} <- required_collection_map(map, "prompt_versions"),
+         {:ok, models} <- required_collection_map(map, "models"),
+         :ok <- validate_schema1_prompt_versions(prompt_versions),
+         :ok <- validate_schema1_models(models) do
+      validate_schema1_deployments(deployments, prompt_versions, models)
     end
   end
 
-  defp optional_object(map, key) do
+  defp required_collection_map(map, key) do
     case get(map, key) do
       value when is_map(value) ->
         {:ok, value}
 
       nil ->
-        {:ok, nil}
+        {:error, {:invalid_prompt_document, "#{key} is required"}}
 
       other ->
         {:error, {:invalid_prompt_document, "#{key} must be an object, got: #{inspect(other)}"}}
     end
   end
 
-  defp validate_schema8_prompt_versions(prompt_versions) do
-    validate_each(prompt_versions, &validate_schema8_prompt_version/2)
-  end
+  defp validate_schema1_prompt_versions(prompt_versions),
+    do: validate_each(prompt_versions, &validate_schema1_prompt_version/2)
 
-  defp validate_schema8_prompt_version(key, raw) do
+  defp validate_schema1_prompt_version(key, raw) do
     with :ok <- require_map(raw, "prompt_versions.#{key}"),
          {:ok, prompt} <- required_string(get(raw, "prompt"), "prompt_versions.#{key}.prompt"),
          {:ok, number} <-
@@ -422,11 +431,9 @@ defmodule PromptOnSDK.PromptDocument do
     end
   end
 
-  defp validate_schema8_models(models) do
-    validate_each(models, &validate_schema8_model/2)
-  end
+  defp validate_schema1_models(models), do: validate_each(models, &validate_schema1_model/2)
 
-  defp validate_schema8_model(key, raw) do
+  defp validate_schema1_model(key, raw) do
     with :ok <- require_map(raw, "models.#{key}"),
          {:ok, provider} <- required_string(get(raw, "provider"), "models.#{key}.provider"),
          {:ok, model} <- required_string(get(raw, "model"), "models.#{key}.model") do
@@ -434,13 +441,13 @@ defmodule PromptOnSDK.PromptDocument do
     end
   end
 
-  defp validate_schema8_deployments(deployments, prompt_versions, models) do
+  defp validate_schema1_deployments(deployments, prompt_versions, models) do
     validate_each(deployments, fn key, raw ->
-      validate_schema8_deployment(key, raw, prompt_versions, models)
+      validate_schema1_deployment(key, raw, prompt_versions, models)
     end)
   end
 
-  defp validate_schema8_deployment(key, raw, prompt_versions, models) do
+  defp validate_schema1_deployment(key, raw, prompt_versions, models) do
     with :ok <- require_map(raw, "deployments.#{key}"),
          {:ok, number} <-
            strict_positive_integer(
@@ -483,9 +490,8 @@ defmodule PromptOnSDK.PromptDocument do
       else: {:error, "#{subject} #{key} must match #{detail} #{expected}"}
   end
 
-  defp require_map_key(map, key, message) do
-    if Map.has_key?(map, key), do: :ok, else: {:error, message}
-  end
+  defp require_map_key(map, key, message),
+    do: if(Map.has_key?(map, key), do: :ok, else: {:error, message})
 
   defp required_string(value, _field) when is_binary(value) and value != "", do: {:ok, value}
 
@@ -507,15 +513,15 @@ defmodule PromptOnSDK.PromptDocument do
   # ---------------------------------------------------------------------------
   # deployments (v3: pins)
 
-  defp decode_deployments(nil, _version, warnings), do: {%{}, warnings}
+  defp decode_deployments(nil, warnings), do: {%{}, warnings}
 
-  defp decode_deployments(map, version, warnings) when is_map(map) do
+  defp decode_deployments(map, warnings) when is_map(map) do
     Enum.reduce(map, {%{}, warnings}, fn {key, raw}, {acc, warnings} ->
       key = to_str(key)
 
       case raw do
         raw when is_map(raw) ->
-          {deployment, warnings} = decode_deployment(key, raw, version, warnings)
+          {deployment, warnings} = decode_deployment(key, raw, warnings)
           {Map.put(acc, key, deployment), warnings}
 
         other ->
@@ -524,23 +530,22 @@ defmodule PromptOnSDK.PromptDocument do
     end)
   end
 
-  defp decode_deployments(other, _version, warnings),
+  defp decode_deployments(other, warnings),
     do: {%{}, [{:invalid_deployments, other} | warnings]}
 
-  defp decode_deployment(key, raw, version, warnings) do
-    {pins, warnings} = decode_prompt_pins(raw, key, version, warnings)
+  defp decode_deployment(key, raw, warnings) do
+    {pins, warnings} = decode_prompt_pins(raw, key, warnings)
 
     {api, warnings} =
-      to_enum(if(version >= 6, do: get(raw, "api")), @apis, nil, :unknown_api, warnings)
+      to_enum(get(raw, "api"), @apis, nil, :unknown_api, warnings)
 
-    request_path = if version >= 6, do: get(raw, "request_path")
+    request_path = get(raw, "request_path")
 
     {%{
-       id: if(version >= 8, do: nil, else: to_str(get(raw, "id"))),
-       prompt_key: to_str(get(raw, "prompt_key")) || key,
+       id: nil,
+       prompt_key: key,
        revision: to_revision(get(raw, "revision")),
-       model_id:
-         if(version >= 8, do: readable_model_key(raw), else: to_str(get(raw, "model_id"))),
+       model_id: readable_model_key(raw),
        api: api,
        request_path: if(is_binary(request_path), do: request_path),
        params: to_string_key_map(get(raw, "params")),
@@ -561,7 +566,7 @@ defmodule PromptOnSDK.PromptDocument do
 
   defp revision_warnings(value, key, warnings), do: [{:invalid_revision, {key, value}} | warnings]
 
-  defp decode_prompt_pins(raw, key, version, warnings) when version >= 8 do
+  defp decode_prompt_pins(raw, key, warnings) do
     case strict_positive_integer(get(raw, "prompt_version")) do
       {:ok, n} ->
         {%{"default" => "#{key}@#{n}"}, warnings}
@@ -570,26 +575,6 @@ defmodule PromptOnSDK.PromptDocument do
         {%{}, [{:invalid_prompt_version_pin, {key, get(raw, "prompt_version")}} | warnings]}
     end
   end
-
-  defp decode_prompt_pins(raw, key, _version, warnings),
-    do: decode_template_pins(get(raw, "template_pins"), key, warnings)
-
-  defp decode_template_pins(nil, _key, warnings), do: {%{}, warnings}
-
-  defp decode_template_pins(map, key, warnings) when is_map(map) do
-    Enum.reduce(map, {%{}, warnings}, fn {name, version_id}, {acc, warnings} ->
-      case {to_str(name), to_str(version_id)} do
-        {name, version_id} when is_binary(name) and is_binary(version_id) ->
-          {Map.put(acc, name, version_id), warnings}
-
-        _ ->
-          {acc, [{:invalid_template_pin, {key, name}} | warnings]}
-      end
-    end)
-  end
-
-  defp decode_template_pins(other, key, warnings),
-    do: {%{}, [{:invalid_template_pins, {key, other}} | warnings]}
 
   # ---------------------------------------------------------------------------
   # template versions / models
@@ -611,28 +596,16 @@ defmodule PromptOnSDK.PromptDocument do
     end)
   end
 
-  # The list form (`[%{"id" => ...}]`) is accepted too.
-  defp decode_by_id(list, fun, warnings) when is_list(list) do
-    Enum.reduce(list, {%{}, warnings}, fn
-      raw, {acc, warnings} when is_map(raw) ->
-        {entry, warnings} = fun.(raw, warnings)
-        {Map.put(acc, entry.id, entry), warnings}
-
-      other, {acc, warnings} ->
-        {acc, [{:invalid_entry, other} | warnings]}
-    end)
-  end
-
   defp decode_by_id(other, _fun, warnings), do: {%{}, [{:invalid_collection, other} | warnings]}
 
   defp put_default_id(raw, id) do
     if is_nil(get(raw, "id")), do: Map.put(raw, "id", id), else: raw
   end
 
-  defp decode_prompt_version(raw, version, warnings) do
+  defp decode_prompt_version(raw, warnings) do
     {kind, warnings} =
       to_enum(
-        if(version >= 6, do: get(raw, "kind")),
+        get(raw, "kind"),
         @kinds,
         nil,
         :unknown_version_kind,
@@ -643,20 +616,12 @@ defmodule PromptOnSDK.PromptDocument do
     {messages, warnings} = decode_messages(get(raw, "messages"), warnings)
 
     {%{
-       id:
-         if(version >= 8,
-           do: readable_prompt_version_key(raw),
-           else: to_str(get(raw, "id"))
-         ),
-       prompt_template_id:
-         if(version >= 8,
-           do: to_str(get(raw, "prompt")),
-           else: to_str(get(raw, "prompt_template_id"))
-         ),
+       id: readable_prompt_version_key(raw),
+       prompt_template_id: to_str(get(raw, "prompt")),
        number: to_int(get(raw, "number"), nil),
        engine: engine,
        kind: kind,
-       decision: if(version >= 6, do: PromptOnSDK.Decisions.normalize(get(raw, "decision"))),
+       decision: PromptOnSDK.Decisions.normalize(get(raw, "decision")),
        messages: messages,
        tools: decode_tools(get(raw, "tools")),
        text_template: to_str(get(raw, "text_template"))
@@ -717,7 +682,7 @@ defmodule PromptOnSDK.PromptDocument do
     {%{
        id: readable_model_id(raw),
        provider: to_known_atom_or_nil(get(raw, "provider"), @providers),
-       model_id: to_str(get(raw, "model")) || to_str(get(raw, "model_id")),
+       model_id: to_str(get(raw, "model")),
        display_name: to_str(get(raw, "display_name")),
        metadata: to_string_key_map(get(raw, "metadata")),
        provider_options: to_string_key_map(get(raw, "provider_options")),
@@ -743,7 +708,7 @@ defmodule PromptOnSDK.PromptDocument do
     end
   end
 
-  defp readable_model_id(raw), do: readable_model_key(raw) || to_str(get(raw, "id"))
+  defp readable_model_id(raw), do: readable_model_key(raw)
 
   defp readable_model_key(raw) do
     case {to_str(get(raw, "provider")), to_str(get(raw, "model"))} do

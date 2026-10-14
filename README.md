@@ -12,17 +12,17 @@ track(prompt, meta, fn -> call the provider end) ─▶ log recorded asynchronou
 
 ## Installation
 
-Install the v0.7.1 GitHub source release:
+Install the v0.8.0 GitHub source release:
 
 ```elixir
 def deps do
-  [{:prompton_sdk, git: "https://github.com/polimo-dev/prompton-elixir.git", tag: "v0.7.1"}]
+  [{:prompton_sdk, git: "https://github.com/polimo-dev/prompton-elixir.git", tag: "v0.8.0"}]
 end
 ```
 
 ## Prepared provider requests
 
-SDK 0.7 reads schema v8 bulk documents and schema v9 single-prompt responses, then returns the deployed API, origin-relative path and rendered
+SDK 0.8 reads schema v1 prompt detail responses and exported bundles, then returns the deployed API, origin-relative path and rendered
 body. Your app supplies the provider origin and credentials and sends the HTTP request:
 
 ```elixir
@@ -58,7 +58,7 @@ If an old prompt version still contains a slot, rendering fails with an actionab
 history in application code so native provider fields such as `tool_calls`, `tool_call_id`, null
 content, array content and provider-specific JSON fields stay under your control.
 
-Schema v7 prompt versions may also include canonical tool configuration:
+Prompt versions may also include canonical tool configuration:
 
 ```json
 {
@@ -88,10 +88,8 @@ Supported explicit routes are OpenRouter Chat (`/api/v1/chat/completions`) and S
 (`/api/v1/systemone`), OpenAI Chat (`/v1/chat/completions`), and Groq Chat
 (`/openai/v1/chat/completions`). Existing OpenRouter Decision deployments pinned to the legacy
 `/api/alpha/decisions` route still prepare successfully. Unsupported providers, missing metadata,
-API/type mismatches and invalid native questions return an error before a provider call. Legacy schema
-v5 documents remain readable by `messages/3` and `text/3`, but cannot prepare a request. Schema v6
-documents can still prepare requests without canonical tools. Upgrade the server and cached/bundled
-document to schema v8 when adopting editor-managed tool definitions and readable resource refs.
+API/type mismatches and invalid native questions return an error before a provider call. Cached and
+bundled prompt documents must use schema v1 readable resource references.
 
 Options include `template:`, shallow `params:` and `provider_options:` overrides. Chat omits nil
 parameter values; provider options preserve explicit nil as JSON null. Decisions accept only
@@ -289,41 +287,40 @@ streaming), `PromptOnSDK.feedback/1` (`%{log_id, kind, value, …}`),
 
 ## Prompt documents — a deployment is a pin, not a router
 
-The SDK reads **schema v9 single-prompt responses, schema v8 bulk documents, schema v7, schema v6 and legacy v5**; prepared requests require v6+ metadata. A deployment revision no longer routes: no rules, no conditions, no targets,
-no weights, no A/B, no context dimensions. One revision is **one model** plus **one pinned prompt version**:
+The SDK reads **schema v1** prompt documents. Runtime fetches use the singular `GET /prompts/:key`
+detail shape; exported bundles aggregate those same details into keyed maps. The lightweight
+`GET /prompts` response is a discovery list and is not loadable configuration.
+
+A deployment revision no longer routes: no rules, no conditions, no targets, no weights, no A/B,
+no context dimensions. One revision is **one model** plus **one pinned prompt version**:
 
 ```json
 "deployments": {
   "support_reply": {
     "revision": "v2026.09.30-7",
-    "provider": "openrouter", "model": "openai/gpt-4o-mini", "prompt_version": 3,
-    "params": {"temperature": 0.3}, "provider_options": {"only": ["OpenAI"]}
+    "provider": "openrouter",
+    "model": "openai/gpt-4o-mini",
+    "prompt_version": 3,
+    "params": {"temperature": 0.3},
+    "provider_options": {"only": ["OpenAI"]}
   }
 }
 ```
 
-For schema v8 and v9, request-time selection is the prompt key and variables; the deployment pins the single default prompt version:
+Request-time selection is the prompt key and variables; the deployment pins the default prompt
+version:
 
 ```elixir
 {:ok, r} = PromptOnSDK.prompt("support_reply")
 ```
 
-Named template selection remains supported only for legacy local cache compatibility. When a legacy snapshot carries named pins, a name the deployment does not pin is `{:error, :unknown_template}` — the SDK never falls back to `"default"` silently, because serving the wrong language is worse than an error.
-
-New apps should keep one default template per prompt and branch inside the template with variables such as `language`.
-
-| | v2 (deleted) | v5 |
-|---|---|---|
-| Config unit | `deployments[key].rules[]` with inline targets | `deployments[key]` = model + `template_pins` |
-| Request-time input | `ctx` map + `target_id` + `subject_key` | `template: ` name |
-| A/B split | weighted targets | — (deploy a revision, roll back if it is worse) |
-| Prompt identity | `target_id`, `rule_id`, `deployment_id`, `deployment_revision` | local `deployment_id`, `deployment_revision`, `template`, local `prompt_version_id` |
-| Logged keys | `+ rule_id`, `target_id` | `prompt_key`, `deployment_revision`, `template`, `prompt_version_number` |
+New apps should keep one default template per prompt and branch inside the template with variables
+such as `language`. Cached/bundled documents with any other schema version are refused with
+`{:error, {:unsupported_schema_version, n}}`; the SDK keeps the last valid value and tries the
+requested prompt again after the per-key attempt gate allows it.
 
 Everything else is unchanged: `default_params ⊕ deployment params`, `model.provider_options ⊕ deployment
-provider_options`, templates, per-prompt ETags, disk/bundle fallback, monitoring-log envelope. v1/v2 documents (a stale disk
-cache or an old repo bundle) are refused with `{:error, {:unsupported_schema_version, n}}`; the SDK keeps the
-last valid value and tries the requested prompt again after the per-key attempt gate allows it.
+provider_options`, templates, per-prompt ETags, disk/bundle fallback, and the monitoring-log envelope.
 
 ## Logging pipeline
 
@@ -394,9 +391,10 @@ to the calling process instead of the buffer.
 mix prompton.export --out priv/prompton/prompts.production.json [--base-url URL] [--api-key KEY]
 ```
 
-Fetches `GET /prompts` (flags → `PTN_BASE_URL`/`PTN_API_KEY` env → app config) and writes the JSON
-plus `<out>.meta.json` (etag, last_modified, environment, exported_at). Run it in CI on every build and commit
-the result; on failure the task exits non-zero and leaves the existing file untouched.
+Fetches the lightweight `GET /prompts` discovery list, fetches each `GET /prompts/:key` detail,
+assembles a schema v1 bundle, and writes the JSON plus `<out>.meta.json` (etag, last_modified,
+environment, exported_at). Run it in CI on every build and commit the result; on failure the task
+exits non-zero and leaves the existing file untouched.
 
 ## Modules
 

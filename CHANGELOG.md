@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.0
+
+- Reset prompt document decoding to schema v1 only. Runtime prompt detail responses and exported bundles now use readable resource references: deployments carry `provider`, `model`, and `prompt_version`; prompt versions are keyed as `<prompt>@<number>`; models are keyed as `<provider>:<model>`.
+- Use `variables` as the only public prompt-variable field across decoded documents, test stubs, conformance fixtures, and exports.
+- Export bundles by fetching the lightweight prompt list, fetching each prompt detail, validating project/environment/key identity, and assembling a schema v1 bundle with a locally derived hash.
+- Reject legacy resource-reference shapes and mixed response envelopes instead of accepting UUID-backed prompt, model, or version references.
+
 ## 0.7.1
 
 - Read schema v9 single-prompt responses from `GET /prompts/:key`, where `prompt`,

@@ -27,11 +27,6 @@ defmodule PromptOnSDK.Test do
         on_exit(&PromptOnSDK.Test.clear/0)
       end
 
-  Named prompts (language branches) are stubbed with `template: `:
-  `stub("support_reply", %{model: ..., template: "ko", ...})` corresponds to
-  `PromptOnSDK.prompt("support_reply", template: "ko")`. Calling it several times for the same key with
-  different names accumulates pins.
-
       test "worker records a log" do
         assert :ok = perform_job(MyApp.Workers.SupportReply, %{...})
         # partial match (map pattern)
@@ -41,8 +36,8 @@ defmodule PromptOnSDK.Test do
   `stub/2` **accumulates** onto the existing test document (multiple Prompts). `put_prompt_document/1`
   replaces it as a whole. `stub/2` options: `model:` (required, the provider model string),
   `provider:` (default `:openrouter`), `messages:` (chat) or `text_template:` (text), `kind:`
-  (default `:chat`; `:embedding` has no prompt), `template: ` (the template name, default
-  `"default"`), `params:`, `provider_options:`, `payload_policy:`, `environment:`.
+  (default `:chat`; `:embedding` has no prompt), `params:`, `provider_options:`,
+  `payload_policy:`, `environment:`.
   """
 
   alias PromptOnSDK.PromptDocument
@@ -83,10 +78,9 @@ defmodule PromptOnSDK.Test do
   end
 
   @doc """
-  Builds a minimal prompt document entry for one Prompt and merges it into the current test document
-  (creating one if there is none). One Deployment pin → one PromptVersion/Model. Calling it again
-  for the same prompt with only `template: ` changed **adds** a pin under that name (the model and
-  params of the last call win).
+  Builds a minimal schema v1 prompt document entry for one Prompt and merges it into the current
+  test document (creating one if there is none). One Deployment pin → one PromptVersion/Model.
+  Calling it again for the same prompt replaces that prompt's default pin.
   """
   @spec stub(String.t() | atom(), map() | keyword()) :: :ok
   def stub(prompt_key, spec) do
@@ -94,33 +88,31 @@ defmodule PromptOnSDK.Test do
     spec = Map.new(spec)
     kind = Map.get(spec, :kind, :chat)
     model = Map.get(spec, :model) || raise ArgumentError, "stub/2 requires :model"
-    template = to_string(Map.get(spec, :template, "default"))
+    provider = to_string(Map.get(spec, :provider, :openrouter))
+    model_key = "#{provider}:#{model}"
 
-    ids = %{pv: "stub-pv-#{key}-#{template}", model: "stub-model-#{key}"}
-    prompt_version = stub_prompt_version(kind, ids.pv, spec)
+    prompt_version = stub_prompt_version(key, kind, spec)
+
+    document = %{
+      "schema_version" => 1,
+      "environment" => Map.get(spec, :environment),
+      "prompts" => %{key => stub_prompt(kind, spec)},
+      "deployments" =>
+        if(prompt_version,
+          do: %{key => stub_deployment(key, model, spec)},
+          else: %{}
+        ),
+      "prompt_versions" => if(prompt_version, do: %{"#{key}@1" => prompt_version}, else: %{}),
+      "models" => %{model_key => stub_model(provider, model, spec)}
+    }
+
+    {:ok, uc_data, _} = PromptDocument.decode(document)
 
     base =
       case Store.get() do
         %{source: :manual, data: %PromptDocument{} = data} -> data
         _ -> %PromptDocument{environment: Map.get(spec, :environment)}
       end
-
-    pins =
-      case Map.get(base.deployments, key) do
-        %{template_pins: pins} when is_map(pins) -> pins
-        _ -> %{}
-      end
-
-    pins = if prompt_version, do: Map.put(pins, template, ids.pv), else: %{}
-
-    {:ok, uc_data, _} =
-      PromptDocument.decode(%{
-        "schema_version" => 7,
-        "prompts" => %{key => stub_prompt(key, kind, spec)},
-        "deployments" => %{key => stub_deployment(key, ids, pins, spec)},
-        "prompt_versions" => if(prompt_version, do: %{ids.pv => prompt_version}, else: %{}),
-        "models" => %{ids.model => stub_model(ids.model, model, spec)}
-      })
 
     merged = %PromptDocument{
       base
@@ -141,11 +133,11 @@ defmodule PromptOnSDK.Test do
     put_prompt_document(merged, [])
   end
 
-  defp stub_prompt_version(:embedding, _pv_id, _spec), do: nil
+  defp stub_prompt_version(_key, :embedding, _spec), do: nil
 
-  defp stub_prompt_version(:text, pv_id, spec) do
+  defp stub_prompt_version(key, :text, spec) do
     %{
-      "id" => pv_id,
+      "prompt" => key,
       "kind" => "text",
       "number" => 1,
       "engine" => to_string(Map.get(spec, :engine, :liquid)),
@@ -153,9 +145,9 @@ defmodule PromptOnSDK.Test do
     }
   end
 
-  defp stub_prompt_version(:decision, pv_id, spec) do
+  defp stub_prompt_version(key, :decision, spec) do
     %{
-      "id" => pv_id,
+      "prompt" => key,
       "kind" => "decision",
       "number" => 1,
       "engine" => to_string(Map.get(spec, :engine, :liquid)),
@@ -163,9 +155,9 @@ defmodule PromptOnSDK.Test do
     }
   end
 
-  defp stub_prompt_version(_chat, pv_id, spec) do
+  defp stub_prompt_version(key, _chat, spec) do
     %{
-      "id" => pv_id,
+      "prompt" => key,
       "number" => 1,
       "kind" => "chat",
       "engine" => to_string(Map.get(spec, :engine, :liquid)),
@@ -174,34 +166,32 @@ defmodule PromptOnSDK.Test do
     }
   end
 
-  defp stub_prompt(key, kind, spec) do
+  defp stub_prompt(kind, spec) do
     %{
-      "id" => "stub-uc-#{key}",
       "kind" => to_string(kind),
-      "input_schema" => Map.get(spec, :input_schema, []),
+      "variables" => Map.get(spec, :variables, []),
       "default_params" => %{},
       "payload_policy" => Map.get(spec, :payload_policy)
     }
   end
 
-  defp stub_deployment(key, ids, pins, spec) do
+  defp stub_deployment(_key, model, spec) do
     %{
-      "id" => "stub-deployment-#{key}",
       "revision" => "v2026.09.30-1",
-      "model_id" => ids.model,
+      "provider" => to_string(Map.get(spec, :provider, :openrouter)),
+      "model" => model,
+      "prompt_version" => 1,
       "api" => Map.get(spec, :api),
       "request_path" => Map.get(spec, :request_path),
       "params" => Map.get(spec, :params, %{}),
-      "provider_options" => Map.get(spec, :provider_options, %{}),
-      "template_pins" => pins
+      "provider_options" => Map.get(spec, :provider_options, %{})
     }
   end
 
-  defp stub_model(model_id, model, spec) do
+  defp stub_model(provider, model, _spec) do
     %{
-      "id" => model_id,
-      "provider" => to_string(Map.get(spec, :provider, :openrouter)),
-      "model_id" => model,
+      "provider" => provider,
+      "model" => model,
       "display_name" => model,
       "metadata" => %{},
       "provider_options" => %{},
