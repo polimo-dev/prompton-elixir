@@ -145,6 +145,68 @@ defmodule PromptOnSDK.PromptDocumentTest do
       assert data.models["openrouter:openai/gpt-4o-mini"].model_id == "openai/gpt-4o-mini"
     end
 
+    test "schema v8 requires strict readable resource references" do
+      map = %{
+        "schema_version" => 8,
+        "prompts" => %{"support_reply" => %{"kind" => "chat"}},
+        "deployments" => %{
+          "support_reply" => %{
+            "provider" => "openrouter",
+            "model" => "openai/gpt-4o-mini",
+            "prompt_version" => 2
+          }
+        },
+        "prompt_versions" => %{
+          "support_reply@2" => %{"prompt" => "support_reply", "number" => 2, "kind" => "chat"}
+        },
+        "models" => %{
+          "openrouter:openai/gpt-4o-mini" => %{
+            "provider" => "openrouter",
+            "model" => "openai/gpt-4o-mini"
+          }
+        }
+      }
+
+      assert {:ok, _data, []} = PromptDocument.decode(map)
+
+      string_pin = put_in(map, ["deployments", "support_reply", "prompt_version"], "2")
+      assert {:error, {:invalid_prompt_document, message}} = PromptDocument.decode(string_pin)
+      assert message =~ "deployments.support_reply.prompt_version"
+      assert message =~ "positive integer"
+
+      bool_pin = put_in(map, ["deployments", "support_reply", "prompt_version"], true)
+      assert {:error, {:invalid_prompt_document, message}} = PromptDocument.decode(bool_pin)
+      assert message =~ "positive integer"
+
+      bad_version_key =
+        map
+        |> update_in(["prompt_versions"], fn versions ->
+          version = Map.fetch!(versions, "support_reply@2")
+          %{"other@2" => version}
+        end)
+
+      assert {:error, {:invalid_prompt_document, message}} =
+               PromptDocument.decode(bad_version_key)
+
+      assert message =~ "prompt_versions key other@2"
+
+      missing_model = put_in(map, ["deployments", "support_reply", "model"], "openai/missing")
+      assert {:error, {:invalid_prompt_document, message}} = PromptDocument.decode(missing_model)
+      assert message =~ "missing model openrouter:openai/missing"
+
+      colon_model =
+        map
+        |> put_in(["deployments", "support_reply", "model"], "vendor:family/model")
+        |> put_in(["models"], %{
+          "openrouter:vendor:family/model" => %{
+            "provider" => "openrouter",
+            "model" => "vendor:family/model"
+          }
+        })
+
+      assert {:ok, _data, []} = PromptDocument.decode(colon_model)
+    end
+
     test "a newer version is refused" do
       map = Map.put(Fixtures.snapshot(), "schema_version", 9)
 

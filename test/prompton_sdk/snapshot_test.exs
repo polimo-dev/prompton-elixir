@@ -693,6 +693,41 @@ defmodule PromptOnSDK.SnapshotTest do
       assert length(FakeClient.calls(:fetch_prompt)) == 2
     end
 
+    test "schema v8 per-key fetch persists original bytes across disk restart" do
+      path = tmp_path("cache-v8-raw.json")
+      body = Jason.encode!(readable_snapshot(), pretty: true)
+
+      FakeClient.set(:fetch_prompt, fn "diary_generation", nil, _opts ->
+        ok_200(body, ~s("raw-v8"))
+      end)
+
+      start_sdk(disk_cache: path)
+
+      assert {:ok, %{model: "anthropic/claude-sonnet-4", etag: ~s("raw-v8")}} =
+               PromptOnSDK.prompt("diary_generation")
+
+      wait_until(fn ->
+        with {:ok, cached} <- File.read(path),
+             true <- cached == body,
+             meta when is_map(meta) <- Store.read_meta(path) do
+          get_in(meta, ["prompt_bodies", "diary_generation"]) == body and
+            not is_map(meta["prompt_documents"])
+        else
+          _ -> false
+        end
+      end)
+
+      stop_supervised!(PromptOnSDK)
+      Store.erase()
+      PromptOnSDK.Config.erase()
+      FakeClient.reset()
+
+      start_sdk(mode: :offline, api_key: nil, disk_cache: path)
+
+      assert {:ok, %{model: "anthropic/claude-sonnet-4", source: :disk}} =
+               PromptOnSDK.prompt("diary_generation")
+    end
+
     test "successful per-key remote configs persist to disk and survive restart independently" do
       path = tmp_path("cache.json")
 

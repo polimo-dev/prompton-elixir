@@ -340,11 +340,14 @@ defmodule PromptOnSDK.Snapshot do
       Store.new_entry(merged, :remote,
         etag: current && current.etag,
         last_modified: current && current.last_modified,
-        fetched_at: (current && current.fetched_at) || now
+        fetched_at: (current && current.fetched_at) || now,
+        body: (current && current[:body]) || response_body(resp.body)
       )
       |> merge_prompt_meta(current)
       |> merge_prompt_docs(current)
+      |> merge_prompt_bodies(current)
       |> Store.put_prompt_document(key, data)
+      |> Store.put_prompt_body(key, response_body(resp.body))
       |> Store.put_prompt_meta(key, prompt_meta_from_cache(cache))
 
     Store.put(entry)
@@ -481,6 +484,14 @@ defmodule PromptOnSDK.Snapshot do
   defp merge_prompt_docs(entry, nil), do: entry
   defp merge_prompt_docs(entry, current), do: %{entry | prompt_docs: current[:prompt_docs] || %{}}
 
+  defp merge_prompt_bodies(entry, nil), do: entry
+
+  defp merge_prompt_bodies(entry, current),
+    do: %{entry | prompt_bodies: current[:prompt_bodies] || %{}}
+
+  defp response_body(body) when is_binary(body), do: body
+  defp response_body(body) when is_map(body), do: Jason.encode!(body)
+
   defp validate_deadline(%{deadline_ms: deadline_ms}) do
     if now_ms() > deadline_ms, do: {:error, :timeout}, else: :ok
   end
@@ -515,7 +526,7 @@ defmodule PromptOnSDK.Snapshot do
   defp persist_disk(_state, _entry), do: :ok
 
   defp persist_disk_now(path, entry) do
-    body = Jason.encode!(Store.document_to_map(entry.data))
+    body = entry[:body] || Jason.encode!(Store.document_to_map(entry.data))
 
     meta = %{
       "etag" => entry.etag,
@@ -523,7 +534,8 @@ defmodule PromptOnSDK.Snapshot do
       "environment" => entry.environment,
       "fetched_at" => DateTime.to_iso8601(entry.fetched_at),
       "prompts" => encode_prompt_meta(entry.prompt_meta),
-      "prompt_documents" => encode_prompt_docs(entry.prompt_docs)
+      "prompt_bodies" => encode_prompt_bodies(entry[:prompt_bodies]),
+      "prompt_documents" => encode_prompt_docs(entry.prompt_docs, entry[:prompt_bodies])
     }
 
     case Store.write_file(path, body, meta) do
@@ -548,8 +560,23 @@ defmodule PromptOnSDK.Snapshot do
     end)
   end
 
-  defp encode_prompt_docs(prompt_docs) do
-    Map.new(prompt_docs || %{}, fn {key, data} -> {key, Store.document_to_map(data)} end)
+  defp encode_prompt_bodies(prompt_bodies) do
+    case Map.new(prompt_bodies || %{}, fn {key, body} -> {key, body} end) do
+      bodies when map_size(bodies) == 0 -> nil
+      bodies -> bodies
+    end
+  end
+
+  defp encode_prompt_docs(prompt_docs, prompt_bodies) do
+    prompt_bodies = prompt_bodies || %{}
+
+    prompt_docs
+    |> Enum.reject(fn {key, _data} -> Map.has_key?(prompt_bodies, key) end)
+    |> Map.new(fn {key, data} -> {key, Store.document_to_map(data)} end)
+    |> case do
+      docs when map_size(docs) == 0 -> nil
+      docs -> docs
+    end
   end
 
   defp prompt_meta_from_cache(cache) do

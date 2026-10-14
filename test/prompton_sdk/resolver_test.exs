@@ -21,8 +21,7 @@ defmodule PromptOnSDK.ResolverTest do
       "environment" => "production",
       "prompts" => %{
         "support_reply" => %{"kind" => "chat", "default_params" => %{"max_tokens" => 512}},
-        "summary" => %{"kind" => "text", "default_params" => %{}},
-        "missing_refs" => %{"kind" => "chat", "default_params" => %{}}
+        "summary" => %{"kind" => "text", "default_params" => %{}}
       },
       "deployments" => %{
         "support_reply" => %{
@@ -38,12 +37,6 @@ defmodule PromptOnSDK.ResolverTest do
           "provider" => "openrouter",
           "model" => "openai/gpt-4o-mini",
           "prompt_version" => 2
-        },
-        "missing_refs" => %{
-          "revision" => "v2026.09.30-5",
-          "provider" => "openrouter",
-          "model" => "openai/missing",
-          "prompt_version" => 3
         }
       },
       "prompt_versions" => %{
@@ -151,17 +144,19 @@ defmodule PromptOnSDK.ResolverTest do
       assert r.prompt_version_id == nil
     end
 
-    test "missing readable refs warn with scoped lookup keys" do
-      assert {:ok, snapshot, []} = PromptDocument.decode(readable_snapshot())
-      assert {:ok, r} = Resolver.resolve(snapshot, "missing_refs")
+    test "missing readable refs are rejected before they can resolve" do
+      map =
+        readable_snapshot()
+        |> put_in(["prompts", "missing_refs"], %{"kind" => "chat", "default_params" => %{}})
+        |> put_in(["deployments", "missing_refs"], %{
+          "revision" => "v2026.09.30-5",
+          "provider" => "openrouter",
+          "model" => "openai/missing",
+          "prompt_version" => 3
+        })
 
-      assert r.warnings == [
-               {:missing_prompt_version, "missing_refs@3"},
-               {:missing_model, "openrouter:openai/missing"}
-             ]
-
-      assert r.prompt_version_number == nil
-      assert r.model == nil
+      assert {:error, {:invalid_prompt_document, message}} = PromptDocument.decode(map)
+      assert message =~ "deployment missing_refs references missing prompt version missing_refs@3"
     end
   end
 

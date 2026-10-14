@@ -122,7 +122,8 @@ defmodule PromptOnSDK.PromptDocument do
 
   def decode(map) when is_map(map) do
     with {:ok, version, warnings} <- schema_version(map),
-         {:ok, prompts_raw} <- fetch_map(map, "prompts") do
+         {:ok, prompts_raw} <- fetch_map(map, "prompts"),
+         :ok <- validate_schema8_references(map, version) do
       {prompts, warnings} = decode_prompts(prompts_raw, warnings)
       {deployments, warnings} = decode_deployments(get(map, "deployments"), version, warnings)
 
@@ -279,6 +280,134 @@ defmodule PromptOnSDK.PromptDocument do
     do: {nil, [{:invalid_payload_policy, other} | warnings]}
 
   # ---------------------------------------------------------------------------
+  # schema v8 validation
+
+  defp validate_schema8_references(_map, version) when version < 8, do: :ok
+
+  defp validate_schema8_references(map, _version) do
+    with {:ok, deployments} <- optional_object(map, "deployments"),
+         {:ok, prompt_versions} <- optional_object(map, "prompt_versions"),
+         {:ok, models} <- optional_object(map, "models"),
+         :ok <- validate_schema8_prompt_versions(prompt_versions || %{}),
+         :ok <- validate_schema8_models(models || %{}) do
+      validate_schema8_deployments(deployments || %{}, prompt_versions || %{}, models || %{})
+    end
+  end
+
+  defp optional_object(map, key) do
+    case get(map, key) do
+      value when is_map(value) ->
+        {:ok, value}
+
+      nil ->
+        {:ok, nil}
+
+      other ->
+        {:error, {:invalid_prompt_document, "#{key} must be an object, got: #{inspect(other)}"}}
+    end
+  end
+
+  defp validate_schema8_prompt_versions(prompt_versions) do
+    validate_each(prompt_versions, &validate_schema8_prompt_version/2)
+  end
+
+  defp validate_schema8_prompt_version(key, raw) do
+    with :ok <- require_map(raw, "prompt_versions.#{key}"),
+         {:ok, prompt} <- required_string(get(raw, "prompt"), "prompt_versions.#{key}.prompt"),
+         {:ok, number} <-
+           strict_positive_integer(get(raw, "number"), "prompt_versions.#{key}.number") do
+      require_equal_key(
+        key,
+        "#{prompt}@#{number}",
+        "prompt_versions key",
+        "embedded prompt version"
+      )
+    end
+  end
+
+  defp validate_schema8_models(models) do
+    validate_each(models, &validate_schema8_model/2)
+  end
+
+  defp validate_schema8_model(key, raw) do
+    with :ok <- require_map(raw, "models.#{key}"),
+         {:ok, provider} <- required_string(get(raw, "provider"), "models.#{key}.provider"),
+         {:ok, model} <- required_string(get(raw, "model"), "models.#{key}.model") do
+      require_equal_key(key, "#{provider}:#{model}", "models key", "embedded model")
+    end
+  end
+
+  defp validate_schema8_deployments(deployments, prompt_versions, models) do
+    validate_each(deployments, fn key, raw ->
+      validate_schema8_deployment(key, raw, prompt_versions, models)
+    end)
+  end
+
+  defp validate_schema8_deployment(key, raw, prompt_versions, models) do
+    with :ok <- require_map(raw, "deployments.#{key}"),
+         {:ok, number} <-
+           strict_positive_integer(
+             get(raw, "prompt_version"),
+             "deployments.#{key}.prompt_version"
+           ),
+         {:ok, provider} <- required_string(get(raw, "provider"), "deployments.#{key}.provider"),
+         {:ok, model} <- required_string(get(raw, "model"), "deployments.#{key}.model"),
+         prompt_version_key = "#{key}@#{number}",
+         model_key = "#{provider}:#{model}",
+         :ok <-
+           require_map_key(
+             prompt_versions,
+             prompt_version_key,
+             "deployment #{key} references missing prompt version #{prompt_version_key}"
+           ) do
+      require_map_key(
+        models,
+        model_key,
+        "deployment #{key} references missing model #{model_key}"
+      )
+    end
+  end
+
+  defp validate_each(map, validator) do
+    Enum.find_value(map, :ok, fn {key, raw} ->
+      case validator.(to_str(key), raw) do
+        :ok -> false
+        {:error, message} -> {:error, {:invalid_prompt_document, message}}
+      end
+    end)
+  end
+
+  defp require_map(value, _label) when is_map(value), do: :ok
+  defp require_map(_value, label), do: {:error, "#{label} must be an object"}
+
+  defp require_equal_key(key, expected, subject, detail) do
+    if key == expected,
+      do: :ok,
+      else: {:error, "#{subject} #{key} must match #{detail} #{expected}"}
+  end
+
+  defp require_map_key(map, key, message) do
+    if Map.has_key?(map, key), do: :ok, else: {:error, message}
+  end
+
+  defp required_string(value, _field) when is_binary(value) and value != "", do: {:ok, value}
+
+  defp required_string(value, field) when is_binary(value),
+    do: {:error, "#{field} must be a non-empty string"}
+
+  defp required_string(nil, field), do: {:error, "#{field} is required"}
+  defp required_string(_value, field), do: {:error, "#{field} must be a string"}
+
+  defp strict_positive_integer(value) when is_integer(value) and value > 0, do: {:ok, value}
+  defp strict_positive_integer(_value), do: :error
+
+  defp strict_positive_integer(value, _field) when is_integer(value) and value > 0,
+    do: {:ok, value}
+
+  defp strict_positive_integer(nil, field), do: {:error, "#{field} is required"}
+  defp strict_positive_integer(_value, field), do: {:error, "#{field} must be a positive integer"}
+
+  # ---------------------------------------------------------------------------
   # deployments (v3: pins)
 
   defp decode_deployments(nil, _version, warnings), do: {%{}, warnings}
@@ -336,15 +465,12 @@ defmodule PromptOnSDK.PromptDocument do
   defp revision_warnings(value, key, warnings), do: [{:invalid_revision, {key, value}} | warnings]
 
   defp decode_prompt_pins(raw, key, version, warnings) when version >= 8 do
-    case to_int(get(raw, "prompt_version"), nil) do
-      n when is_integer(n) and n > 0 ->
+    case strict_positive_integer(get(raw, "prompt_version")) do
+      {:ok, n} ->
         {%{"default" => "#{key}@#{n}"}, warnings}
 
-      nil ->
-        {%{}, warnings}
-
-      n ->
-        {%{}, [{:invalid_prompt_version_pin, {key, n}} | warnings]}
+      :error ->
+        {%{}, [{:invalid_prompt_version_pin, {key, get(raw, "prompt_version")}} | warnings]}
     end
   end
 
@@ -511,8 +637,8 @@ defmodule PromptOnSDK.PromptDocument do
   end
 
   defp readable_prompt_version_key(raw) do
-    case {to_str(get(raw, "prompt")), to_int(get(raw, "number"), nil)} do
-      {prompt, number} when is_binary(prompt) and is_integer(number) and number > 0 ->
+    case {to_str(get(raw, "prompt")), strict_positive_integer(get(raw, "number"))} do
+      {prompt, {:ok, number}} when is_binary(prompt) ->
         "#{prompt}@#{number}"
 
       _ ->

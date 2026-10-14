@@ -15,8 +15,10 @@ defmodule PromptOnSDK.Snapshot.Store do
           fetched_at: DateTime.t(),
           stale_since: DateTime.t() | nil,
           environment: String.t() | nil,
+          body: binary() | nil,
           prompt_meta: %{String.t() => map()},
-          prompt_docs: %{String.t() => PromptDocument.t()}
+          prompt_docs: %{String.t() => PromptDocument.t()},
+          prompt_bodies: %{String.t() => binary()}
         }
 
   @doc "The current snapshot entry. `nil` when there is none."
@@ -42,8 +44,10 @@ defmodule PromptOnSDK.Snapshot.Store do
       fetched_at: Keyword.get(opts, :fetched_at, DateTime.utc_now()),
       stale_since: Keyword.get(opts, :stale_since),
       environment: data.environment,
+      body: Keyword.get(opts, :body),
       prompt_meta: Keyword.get(opts, :prompt_meta) || prompt_meta(data, source, opts),
-      prompt_docs: Keyword.get(opts, :prompt_docs) || prompt_docs(data)
+      prompt_docs: Keyword.get(opts, :prompt_docs) || prompt_docs(data),
+      prompt_bodies: Keyword.get(opts, :prompt_bodies) || %{}
     }
   end
 
@@ -82,6 +86,12 @@ defmodule PromptOnSDK.Snapshot.Store do
     %{entry | prompt_docs: Map.put(entry[:prompt_docs] || %{}, key, data)}
   end
 
+  @doc "Stores the original response bytes for one prompt key."
+  @spec put_prompt_body(entry(), String.t(), binary()) :: entry()
+  def put_prompt_body(entry, key, body) when is_binary(key) and is_binary(body) do
+    %{entry | prompt_bodies: Map.put(entry[:prompt_bodies] || %{}, key, body)}
+  end
+
   @doc """
   Reads a snapshot file (+ sidecar) and builds an entry. `source` is `:disk` or `:bundle`.
   When `env_slug` is given, the environment guard is applied.
@@ -101,15 +111,19 @@ defmodule PromptOnSDK.Snapshot.Store do
       ]
 
       prompt_meta = decode_prompt_meta(meta["prompts"], data, source, base_opts)
-      prompt_docs = decode_prompt_docs(meta["prompt_documents"], data, env_slug)
+      prompt_bodies = decode_prompt_bodies(meta["prompt_bodies"])
+      prompt_docs = decode_prompt_docs(meta["prompt_documents"], prompt_bodies, data, env_slug)
+      merged_data = merge_prompt_docs_into_base(data, prompt_docs || %{})
 
       {:ok,
-       new_entry(data, source,
+       new_entry(merged_data, source,
          etag: meta["etag"],
          last_modified: meta["last_modified"],
          fetched_at: fetched_at,
+         body: body,
          prompt_meta: prompt_meta,
-         prompt_docs: prompt_docs
+         prompt_docs: prompt_docs,
+         prompt_bodies: prompt_bodies
        )}
     end
   end
@@ -238,18 +252,32 @@ defmodule PromptOnSDK.Snapshot.Store do
 
   defp decode_one_prompt_meta(_other, default, _source), do: default
 
-  defp decode_prompt_docs(nil, _base, _env_slug), do: nil
+  defp decode_prompt_bodies(bodies) when is_map(bodies) do
+    Map.new(bodies, fn {key, body} -> {to_string(key), body} end)
+    |> Enum.filter(fn {_key, body} -> is_binary(body) end)
+    |> Map.new()
+  end
 
-  defp decode_prompt_docs(docs, base, env_slug) when is_map(docs) do
-    docs
+  defp decode_prompt_bodies(_other), do: %{}
+
+  defp decode_prompt_docs(docs, prompt_bodies, base, env_slug) do
+    raw_docs =
+      prompt_bodies
+      |> Enum.reduce(%{}, fn {key, body}, acc ->
+        case Jason.decode(body) do
+          {:ok, raw} when is_map(raw) -> Map.put(acc, key, raw)
+          _ -> acc
+        end
+      end)
+      |> Map.merge(if(is_map(docs), do: docs, else: %{}))
+
+    raw_docs
     |> Enum.reduce(%{}, &decode_prompt_doc(&1, &2, base, env_slug))
     |> case do
       docs when map_size(docs) == 0 -> nil
       docs -> docs
     end
   end
-
-  defp decode_prompt_docs(_other, _base, _env_slug), do: nil
 
   defp decode_prompt_doc({key, raw}, acc, base, env_slug) do
     case PromptDocument.decode(raw) do
@@ -273,6 +301,21 @@ defmodule PromptOnSDK.Snapshot.Store do
       data.project == base.project and
       Map.has_key?(data.prompts, key) and
       Map.has_key?(data.deployments, key)
+  end
+
+  defp merge_prompt_docs_into_base(%PromptDocument{} = base, prompt_docs) do
+    Enum.reduce(prompt_docs, base, fn {key, data}, %PromptDocument{} = acc ->
+      %PromptDocument{
+        acc
+        | schema_version: data.schema_version,
+          project: data.project || acc.project,
+          environment: data.environment || acc.environment,
+          prompts: Map.put(acc.prompts, key, Map.fetch!(data.prompts, key)),
+          deployments: Map.put(acc.deployments, key, Map.fetch!(data.deployments, key)),
+          prompt_versions: Map.merge(acc.prompt_versions, data.prompt_versions),
+          models: Map.merge(acc.models, data.models)
+      }
+    end)
   end
 
   defp stringify_json(%{} = map) do

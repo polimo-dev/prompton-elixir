@@ -302,18 +302,15 @@ no weights, no A/B, no context dimensions. One revision is **one model** plus **
 }
 ```
 
-Selection at request time is the template name and nothing else:
+For schema v8, request-time selection is the prompt key and variables; the deployment pins the single default prompt version:
 
 ```elixir
-{:ok, r} = PromptOnSDK.prompt("support_reply")                  # pin "default"
-{:ok, r} = PromptOnSDK.prompt("support_reply", template: "ko")    # pin "ko"
-{:ok, names} = PromptOnSDK.template_names("support_reply")         # ["default", "ko"]
+{:ok, r} = PromptOnSDK.prompt("support_reply")
 ```
 
-A name the deployment does not pin is `{:error, :unknown_template}` — the SDK never falls back to `"default"`
-silently, because shipping English to a `"ko"` request is worse than an error.
+Named template selection remains supported only for legacy local cache compatibility. When a legacy snapshot carries named pins, a name the deployment does not pin is `{:error, :unknown_template}` — the SDK never falls back to `"default"` silently, because serving the wrong language is worse than an error.
 
-New apps should usually keep one default template per prompt and branch inside the template with variables such as `language`; named template pins remain supported by the local decoder and conformance suite for existing snapshots.
+New apps should keep one default template per prompt and branch inside the template with variables such as `language`.
 
 | | v2 (deleted) | v5 |
 |---|---|---|
