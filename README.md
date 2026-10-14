@@ -12,19 +12,11 @@ track(prompt, meta, fn -> call the provider end) ─▶ log recorded asynchronou
 
 ## Installation
 
-The hex package is not published yet, so depend on it by git:
+Install the v0.6.0 GitHub source release:
 
 ```elixir
 def deps do
-  [{:prompton_sdk, git: "https://github.com/polimo-dev/prompton-elixir.git", branch: "main"}]
-end
-```
-
-Once published, the hex line will be:
-
-```elixir
-def deps do
-  [{:prompton_sdk, "~> 0.6"}]
+  [{:prompton_sdk, git: "https://github.com/polimo-dev/prompton-elixir.git", tag: "v0.6.0"}]
 end
 ```
 
