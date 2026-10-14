@@ -730,7 +730,8 @@ defmodule PromptOnSDK.RequestTest do
     assert result.result == response()["answers"]
     assert_receive {:prompton_log, log}
     assert log["template"] == "ko"
-    assert log["prompt_version_id"] == "stub-pv-route-ko"
+    refute Map.has_key?(log, "prompt_version_id")
+    assert log["prompt_version_number"] == 1
     assert log["kind"] == "decision"
     assert log["input"]["decision"] == Map.take(request.body, ~w(state questions))
     assert Jason.decode!(log["output"]["content"]) == response()["answers"]

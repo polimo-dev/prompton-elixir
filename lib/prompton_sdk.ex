@@ -61,7 +61,7 @@ defmodule PromptOnSDK do
   struct. To keep named-prompt evidence aligned in the common flow, a successful
   `messages/3`/`text/3` call with `template: "name"` stores a process-local, one-shot prompt
   selection. The next `track/3` for the same prompt consumes and clears it, so the log records the
-  matching `template`/`prompt_version_id` even when track meta omits `template:`. Render failures,
+  matching `template`/`prompt_version_number` even when track meta omits `template:`. Render failures,
   default renders, and explicit `track(..., template: ...)` clear or override the stored selection.
   To record the pre-render variable values in the log, pass the same map as `meta.variables` of
   `track/3` (see the example above). Request context (free-form tags such as language or plan) is
@@ -259,13 +259,13 @@ defmodule PromptOnSDK do
   @spec log(map(), keyword()) :: :ok
   def log(gen, opts \\ []) do
     config = Config.get()
-    gen = gen |> deep_stringify() |> put_defaults()
+    gen = gen |> deep_stringify() |> put_defaults() |> strip_retired_log_refs()
 
     if closed_transport_log?(gen) do
       :ok
     else
       policy = Keyword.get(opts, :policy) || snapshot_policy(gen["prompt_key"])
-      gen = Payload.apply(gen, policy, config)
+      gen = gen |> Payload.apply(policy, config) |> strip_retired_log_refs()
       dispatch(:logs, {:prompton_log, gen}, gen, config)
     end
   rescue
@@ -290,6 +290,10 @@ defmodule PromptOnSDK do
   end
 
   defp closed_transport_log?(_gen), do: false
+
+  defp strip_retired_log_refs(gen) do
+    Map.drop(gen, ["deployment_id", "prompt_version_id", "model_id"])
+  end
 
   @event_kinds ~w(tool_attempt completion)
   @event_statuses ~w(started ok error denied cancelled timeout missing incomplete)

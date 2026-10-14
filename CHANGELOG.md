@@ -1,7 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 - Unreleased
 
+- Breaking request contract: monitoring logs now send readable prompt evidence only: `deployment_revision`,
+  `template`, and `prompt_version_number`. `deployment_id`, `prompt_version_id`, and `model_id`
+  remain local response/cache evidence but are stripped from log requests.
 - Suppress closed Req connection transport failures from generation logs and error completion events before
   enqueueing, preserving callback results, local telemetry, and application retry behavior.
 - Retire dynamic message slot expansion. Chat prompts now render only PromptOn-managed messages;

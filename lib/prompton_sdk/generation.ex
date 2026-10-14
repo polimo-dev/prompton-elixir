@@ -112,10 +112,9 @@ defmodule PromptOnSDK.Generation do
       "prompt_key" => r.prompt_key,
       # Prompt evidence: the deployment revision and the chosen template. Keys whose value is
       # nil are dropped entirely below.
-      "deployment_id" => r.deployment_id,
       "deployment_revision" => r.deployment_revision,
       "template" => r.template,
-      "prompt_version_id" => r.prompt_version_id,
+      "prompt_version_number" => r.prompt_version_number,
       "source" => to_str(r.source),
       "context" => Params.stringify_keys(meta[:context] || %{}),
       "kind" => to_str(r.kind),

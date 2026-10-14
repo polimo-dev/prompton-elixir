@@ -24,13 +24,13 @@ Once published, the hex line will be:
 
 ```elixir
 def deps do
-  [{:prompton_sdk, "~> 0.5"}]
+  [{:prompton_sdk, "~> 0.6"}]
 end
 ```
 
 ## Prepared provider requests
 
-SDK 0.5 reads schema v7 documents and returns the deployed API, origin-relative path and rendered
+SDK 0.6 reads schema v7 documents and returns the deployed API, origin-relative path and rendered
 body. Your app supplies the provider origin and credentials and sends the HTTP request:
 
 ```elixir
@@ -248,7 +248,7 @@ usage/output; exception → `error/app` and re-raise), builds the §6.4 log map 
 returns what your function returned. Pass the same `variables` to `track` if you want them logged.
 When `messages/3` or `text/3` renders with `template: "name"`, the SDK stores that template choice in
 process-local, one-shot state so the next `track/3` for the same prompt records matching
-`template`/`prompt_version_id` evidence even if `track` meta omits `template:`. `track/3` consumes and
+`template`/`prompt_version_number` evidence even if `track` meta omits `template:`. `track/3` consumes and
 clears that state; render failures, default renders, and explicit `track(..., template: ...)` also
 clear/override it. `request/3` also stores the prepared request input in process-local, one-shot
 state, so the next `track/3` for that prompt logs the actual rendered `input.messages` and effective
@@ -329,8 +329,8 @@ New apps should usually keep one default template per prompt and branch inside t
 | Config unit | `deployments[key].rules[]` with inline targets | `deployments[key]` = model + `template_pins` |
 | Request-time input | `ctx` map + `target_id` + `subject_key` | `template: ` name |
 | A/B split | weighted targets | — (deploy a revision, roll back if it is worse) |
-| Prompt identity | `target_id`, `rule_id`, `deployment_id`, `deployment_revision` | `deployment_id`, `deployment_revision`, `template`, `prompt_version_id` |
-| Logged keys | `+ rule_id`, `target_id` | `prompt_key`, `deployment_id`, `deployment_revision`, `template`, `prompt_version_id` |
+| Prompt identity | `target_id`, `rule_id`, `deployment_id`, `deployment_revision` | local `deployment_id`, `deployment_revision`, `template`, local `prompt_version_id` |
+| Logged keys | `+ rule_id`, `target_id` | `prompt_key`, `deployment_revision`, `template`, `prompt_version_number` |
 
 Everything else is unchanged: `default_params ⊕ deployment params`, `model.provider_options ⊕ deployment
 provider_options`, templates, per-prompt ETags, disk/bundle fallback, monitoring-log envelope. v1/v2 documents (a stale disk

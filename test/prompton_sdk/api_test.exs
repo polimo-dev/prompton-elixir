@@ -237,10 +237,12 @@ defmodule PromptOnSDK.APITest do
       gen = assert_logged(%{"id" => "gen-fixed"})
 
       assert gen["prompt_key"] == "diary_generation"
-      assert gen["deployment_id"] == Fixtures.id(:d_diary)
+      refute Map.has_key?(gen, "deployment_id")
+      refute Map.has_key?(gen, "model_id")
       assert gen["deployment_revision"] == "v2026.09.30-4"
       assert gen["template"] == "ko"
-      assert gen["prompt_version_id"] == Fixtures.id(:pv_ko)
+      refute Map.has_key?(gen, "prompt_version_id")
+      assert gen["prompt_version_number"] == 3
       refute Map.has_key?(gen, "target_id")
       refute Map.has_key?(gen, "rule_id")
       refute Map.has_key?(gen, "variant_id")
@@ -279,6 +281,28 @@ defmodule PromptOnSDK.APITest do
                       %{status: :ok, stop_kind: "stop"}}
     end
 
+    test "manual logs strip retired resource reference fields" do
+      assert :ok =
+               PromptOnSDK.log(%{
+                 "id" => "manual-readable-refs",
+                 "prompt_key" => "diary_generation",
+                 "model" => "anthropic/claude-sonnet-4",
+                 "status" => "ok",
+                 "deployment_id" => Fixtures.id(:d_diary),
+                 "deployment_revision" => "v2026.09.30-4",
+                 "prompt_version_id" => Fixtures.id(:pv_ko),
+                 "prompt_version_number" => 3,
+                 "model_id" => Fixtures.id(:m_sonnet4)
+               })
+
+      gen = assert_logged(%{"id" => "manual-readable-refs"})
+      refute Map.has_key?(gen, "deployment_id")
+      refute Map.has_key?(gen, "prompt_version_id")
+      refute Map.has_key?(gen, "model_id")
+      assert gen["deployment_revision"] == "v2026.09.30-4"
+      assert gen["prompt_version_number"] == 3
+    end
+
     test "track/3 can derive the same named template as messages/3 from template meta" do
       {:ok, default_template} = PromptOnSDK.prompt("diary_generation")
 
@@ -296,7 +320,8 @@ defmodule PromptOnSDK.APITest do
 
       gen = assert_logged(%{"id" => "ko-derived"})
       assert gen["template"] == "ko"
-      assert gen["prompt_version_id"] == Fixtures.id(:pv_ko)
+      assert gen["prompt_version_number"] == 3
+      refute Map.has_key?(gen, "prompt_version_id")
 
       refute get_in(gen, ["metadata", "template"])
 
@@ -323,7 +348,8 @@ defmodule PromptOnSDK.APITest do
 
       gen = assert_logged(%{"id" => "ko-auto"})
       assert gen["template"] == "ko"
-      assert gen["prompt_version_id"] == Fixtures.id(:pv_ko)
+      assert gen["prompt_version_number"] == 3
+      refute Map.has_key?(gen, "prompt_version_id")
 
       assert {:ok, _result} =
                PromptOnSDK.track(r, %{id: "default-after-ko"}, fn ->
@@ -332,7 +358,8 @@ defmodule PromptOnSDK.APITest do
 
       gen = assert_logged(%{"id" => "default-after-ko"})
       assert gen["template"] == "ko"
-      assert gen["prompt_version_id"] == Fixtures.id(:pv_ko)
+      assert gen["prompt_version_number"] == 3
+      refute Map.has_key?(gen, "prompt_version_id")
 
       assert {:ok, _result} =
                PromptOnSDK.track(default_template, %{id: "default-after-consume"}, fn ->
@@ -341,7 +368,8 @@ defmodule PromptOnSDK.APITest do
 
       gen = assert_logged(%{"id" => "default-after-consume"})
       assert gen["template"] == "default"
-      assert gen["prompt_version_id"] == Fixtures.id(:pv_en)
+      assert gen["prompt_version_number"] == 2
+      refute Map.has_key?(gen, "prompt_version_id")
     end
 
     test "{:error, error} → status error, error kind normalized", %{r: r} do
@@ -659,6 +687,29 @@ defmodule PromptOnSDK.APITest do
       assert event["observed_at"]
     end
 
+    test "log final scrub removes retired refs added by redaction before capture" do
+      Application.put_env(:prompton_sdk, :log,
+        redact: fn log ->
+          log
+          |> Map.put("deployment_id", Fixtures.id(:d_diary))
+          |> Map.put("prompt_version_id", Fixtures.id(:pv_en))
+          |> Map.put("model_id", Fixtures.id(:m_gpt5_mini))
+        end
+      )
+
+      assert :ok =
+               PromptOnSDK.log(%{
+                 "prompt_key" => "diary_generation",
+                 "model" => "openai/gpt-5-mini",
+                 "status" => "ok"
+               })
+
+      log = assert_logged(%{"prompt_key" => "diary_generation"})
+      refute Map.has_key?(log, "deployment_id")
+      refute Map.has_key?(log, "prompt_version_id")
+      refute Map.has_key?(log, "model_id")
+    end
+
     test "log/1 drops with a once-per-minute warning and dropped telemetry" do
       Application.put_env(:prompton_sdk, :mode, :live)
       attach_telemetry([[:prompton, :log, :dropped]])
@@ -696,6 +747,69 @@ defmodule PromptOnSDK.APITest do
 
       assert_receive {:fake_client, :post_events, [[%{"event_id" => "evt-async"}]]}, 500
       refute_receive {:prompton_events, _}, 10
+    end
+
+    test "log final scrub removes retired refs added by redaction before send and retry" do
+      Application.delete_env(:prompton_sdk, :mode)
+      FakeClient.notify(self())
+      FakeClient.set(:fetch_prompts, fn _, _ -> {:error, :offline} end)
+      {:ok, agent} = Agent.start_link(fn -> :fail end)
+
+      FakeClient.set(:post_logs, fn _items ->
+        case Agent.get(agent, & &1) do
+          :fail ->
+            Agent.update(agent, fn _ -> :ok end)
+            {:ok, %{status: 503, body: "down", headers: %{}}}
+
+          :ok ->
+            ok_202(1)
+        end
+      end)
+
+      bundle = tmp_path("prompts.production.json")
+      write_snapshot_file(bundle, Fixtures.snapshot())
+
+      start_sdk(
+        bundle: {:file, bundle},
+        log: [
+          flush_size: 1,
+          flush_interval: 60_000,
+          redact: fn log ->
+            log
+            |> Map.put("deployment_id", Fixtures.id(:d_diary))
+            |> Map.put("prompt_version_id", Fixtures.id(:pv_en))
+            |> Map.put("model_id", Fixtures.id(:m_gpt5_mini))
+          end
+        ]
+      )
+
+      assert :ok =
+               PromptOnSDK.log(%{
+                 "id" => "scrubbed-retry",
+                 "prompt_key" => "diary_generation",
+                 "model" => "openai/gpt-5-mini",
+                 "status" => "ok"
+               })
+
+      assert_receive {:fake_client, :post_logs, [[first]]}, 500
+      refute Map.has_key?(first, "deployment_id")
+      refute Map.has_key?(first, "prompt_version_id")
+      refute Map.has_key?(first, "model_id")
+
+      eventually(fn -> PromptOnSDK.Buffer.stats().logs.count == 1 end)
+
+      eventually(
+        fn ->
+          _ = PromptOnSDK.Buffer.flush()
+          length(FakeClient.calls(:post_logs)) >= 2
+        end,
+        3_000
+      )
+
+      assert_receive {:fake_client, :post_logs, [[second]]}, 500
+      refute Map.has_key?(second, "deployment_id")
+      refute Map.has_key?(second, "prompt_version_id")
+      refute Map.has_key?(second, "model_id")
     end
 
     test "track → Buffer → client.post_logs" do

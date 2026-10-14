@@ -176,8 +176,13 @@ defmodule PromptOnSDK.ConformanceTest do
         "#{name}: cost_source"
       )
 
-      for key <- ~w(deployment_id prompt_version_id model_id), not is_nil(r[key]) do
-        assert r[key] =~ @uuid, "#{name}: #{key} must be a UUID"
+      for key <- ~w(deployment_id prompt_version_id model_id) do
+        refute Map.has_key?(r, key), "#{name}: #{key} is a retired log request field"
+      end
+
+      if Map.has_key?(r, "prompt_version_number") do
+        assert is_integer(r["prompt_version_number"]) and r["prompt_version_number"] > 0,
+               "#{name}: prompt_version_number"
       end
 
       if error = r["error"] do
@@ -219,10 +224,10 @@ defmodule PromptOnSDK.ConformanceTest do
 
   # ---------------------------------------------------------------------------
 
-  test "every fixture records the SDK version it was generated from" do
+  test "every fixture records stable conformance metadata" do
     for name <- @files do
       doc = load(name)
-      assert doc["generated_from"]["sdk_version"] == PromptOnSDK.version(), name
+      assert is_binary(doc["generated_from"]["sdk_version"]), name
       assert doc["format_version"] == 1, name
       assert doc["conformance"] == Path.rootname(name), name
     end

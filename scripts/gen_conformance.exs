@@ -1437,7 +1437,7 @@ defmodule GenConformance do
         "name" => "embedding/success",
         "built_by" => "PromptOnSDK.track/3",
         "description" =>
-          "An embedding log: kind is embedding, there is no template or prompt_version_id, the input is text and only input_tokens are reported. source records that the prompt document came from the disk cache.",
+          "An embedding log: kind is embedding, there is no template or prompt_version_number, the input is text and only input_tokens are reported. source records that the prompt document came from the disk cache.",
         "record" =>
           build_record(
             prompt_embed,
@@ -1524,8 +1524,8 @@ defmodule GenConformance do
         "error.kind" => "http_4xx | http_5xx | rate_limited | timeout | transport | parse | app",
         "source" => "remote | disk | bundle | manual",
         "usage.cost_source" => "provider | catalog | unknown",
-        "soft_references" =>
-          "deployment_id, prompt_version_id and model_id must be a UUID or absent; they are not foreign keys, so a record survives the deletion of what it points at",
+        "resource_references" =>
+          "logs identify prompt evidence with prompt_key, deployment_revision, provider, model and optional prompt_version_number. deployment_id, prompt_version_id and model_id are retired request fields and must be absent.",
         "null_keys" =>
           "the SDK omits a TOP-LEVEL key whose value is null; nested nulls inside usage are sent as null and accepted",
         "jsonb_safety" =>
@@ -1544,11 +1544,9 @@ defmodule GenConformance do
       "provider" => "openrouter",
       "status" => "ok",
       "started_at" => "2026-09-04T09:00:00.000000Z",
-      "deployment_id" => @dep_summarize_prod,
       "deployment_revision" => "v2026.09.30-1",
       "template" => "default",
-      "prompt_version_id" => @pv_summarize,
-      "model_id" => @model_chat,
+      "prompt_version_number" => 4,
       "source" => "bundle",
       "input" => %{
         "text" => "Summarize the following notes in one paragraph.\n- alpha\n- beta\n"
