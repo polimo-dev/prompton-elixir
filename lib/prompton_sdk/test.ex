@@ -115,7 +115,7 @@ defmodule PromptOnSDK.Test do
 
     {:ok, uc_data, _} =
       PromptDocument.decode(%{
-        "schema_version" => PromptDocument.schema_version(),
+        "schema_version" => 7,
         "prompts" => %{key => stub_prompt(key, kind, spec)},
         "deployments" => %{key => stub_deployment(key, ids, pins, spec)},
         "prompt_versions" => if(prompt_version, do: %{ids.pv => prompt_version}, else: %{}),

@@ -74,12 +74,12 @@ defmodule PromptOnSDK.Resolver do
       prompt_key: prompt.key,
       kind: kind,
       template: prompt_name,
-      deployment_id: deployment.id,
+      deployment_id: legacy_resource_id(snapshot, deployment),
       deployment_revision: deployment.revision,
-      prompt_version_id: prompt_version && prompt_version.id,
+      prompt_version_id: legacy_resource_id(snapshot, prompt_version),
       prompt_version_number: prompt_version && prompt_version.number,
       engine: prompt_version && prompt_version.engine,
-      model_id: model && model.id,
+      model_id: legacy_resource_id(snapshot, model),
       model: model && model.model_id,
       provider: model && model.provider,
       api: Map.get(deployment, :api),
@@ -98,6 +98,10 @@ defmodule PromptOnSDK.Resolver do
       warnings: warnings
     }
   end
+
+  defp legacy_resource_id(%{schema_version: version}, _resource) when version >= 8, do: nil
+  defp legacy_resource_id(_snapshot, %{id: id}), do: id
+  defp legacy_resource_id(_snapshot, _resource), do: nil
 
   defp serving_kind(_snapshot, _prompt, %{kind: kind}) when not is_nil(kind), do: kind
   defp serving_kind(%{schema_version: 5}, prompt, _version), do: prompt.kind

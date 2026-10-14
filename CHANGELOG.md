@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0
+
+- Read schema v8 prompt documents with public readable resource references:
+  deployments use `provider`, `model`, and a positive `prompt_version` number, prompt versions are
+  keyed as `<prompt>@<number>`, and models are keyed as `<provider>:<model>`.
+- Keep legacy schema v5-v7 cache and bundle documents working while exposing deprecated resource id
+  fields as empty for schema v8 resolutions. `%Prompt{prompt_version: ...}` now preserves the
+  version number even when the legacy version id is absent.
+
 ## 0.6.0
 
 - Breaking request contract: monitoring logs now send readable prompt evidence only: `deployment_revision`,

@@ -84,9 +84,7 @@ defmodule PromptOnSDK.Prompt do
       deployment: %{id: r.deployment_id, revision: r.deployment_revision},
       template: r.template,
       template_names: template_names,
-      prompt_version:
-        r.prompt_version_id &&
-          %{id: r.prompt_version_id, number: r.prompt_version_number},
+      prompt_version: prompt_version_ref(r),
       engine: r.engine,
       messages: r.messages,
       tools: Map.get(r, :tools),
@@ -97,6 +95,12 @@ defmodule PromptOnSDK.Prompt do
       warnings: r.warnings,
       etag: r.etag
     }
+  end
+
+  defp prompt_version_ref(%{prompt_version_id: nil, prompt_version_number: nil}), do: nil
+
+  defp prompt_version_ref(r) do
+    %{id: r.prompt_version_id, number: r.prompt_version_number}
   end
 
   @doc "Prepare a provider POST request without making a provider call. Supports template selection and request overrides."

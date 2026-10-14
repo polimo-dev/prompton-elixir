@@ -43,6 +43,45 @@ defmodule PromptOnSDK.SnapshotTest do
     |> Jason.encode!()
   end
 
+  defp readable_snapshot do
+    %{
+      "schema_version" => 8,
+      "project" => "heydiary",
+      "environment" => "production",
+      "prompts" => %{
+        "diary_generation" => %{
+          "kind" => "chat",
+          "input_schema" => [],
+          "default_params" => %{"temperature" => 0.5}
+        }
+      },
+      "deployments" => %{
+        "diary_generation" => %{
+          "revision" => "v2026.09.30-4",
+          "provider" => "openrouter",
+          "model" => "anthropic/claude-sonnet-4",
+          "prompt_version" => 2,
+          "params" => %{"temperature" => 0.4}
+        }
+      },
+      "prompt_versions" => %{
+        "diary_generation@2" => %{
+          "prompt" => "diary_generation",
+          "number" => 2,
+          "kind" => "chat",
+          "engine" => "liquid",
+          "messages" => [%{"role" => "user", "content" => "Hi {{ name }}"}]
+        }
+      },
+      "models" => %{
+        "openrouter:anthropic/claude-sonnet-4" => %{
+          "provider" => "openrouter",
+          "model" => "anthropic/claude-sonnet-4"
+        }
+      }
+    }
+  end
+
   defp shared_model_json(key, model_name) do
     Jason.encode!(%{
       "schema_version" => 7,
@@ -255,6 +294,20 @@ defmodule PromptOnSDK.SnapshotTest do
 
       assert {:ok, %{source: :bundle}} = PromptOnSDK.prompt("diary_generation")
       assert length(FakeClient.calls(:fetch_prompt)) == 1
+    end
+
+    test "schema v8 bundle resolves readable refs and leaves legacy ids empty" do
+      bundle = tmp_path("bundle-v8.json")
+      write_snapshot_file(bundle, readable_snapshot(), %{"etag" => ~s("bundle-v8")})
+
+      start_sdk(mode: :offline, api_key: nil, bundle: {:file, bundle})
+
+      assert {:ok, prompt} = PromptOnSDK.prompt("diary_generation")
+      assert prompt.source == :bundle
+      assert prompt.model == "anthropic/claude-sonnet-4"
+      assert prompt.deployment.id == nil
+      assert prompt.model_id == nil
+      assert prompt.prompt_version == %{id: nil, number: 2}
     end
 
     test "rejects disk/bundle snapshot whose environment does not match the configured one" do

@@ -100,10 +100,55 @@ defmodule PromptOnSDK.PromptDocumentTest do
       end
     end
 
-    test "a newer version is refused" do
-      map = Map.put(Fixtures.snapshot(), "schema_version", 8)
+    test "schema v8 readable resource keys decode without resource UUIDs" do
+      map = %{
+        "schema_version" => 8,
+        "project" => "helpdesk",
+        "environment" => "production",
+        "prompts" => %{
+          "support_reply" => %{"kind" => "chat", "default_params" => %{"temperature" => 0.5}}
+        },
+        "deployments" => %{
+          "support_reply" => %{
+            "revision" => "v2026.09.30-3",
+            "provider" => "openrouter",
+            "model" => "openai/gpt-4o-mini",
+            "prompt_version" => 2,
+            "params" => %{"temperature" => 0.3}
+          }
+        },
+        "prompt_versions" => %{
+          "support_reply@2" => %{
+            "prompt" => "support_reply",
+            "number" => 2,
+            "kind" => "chat",
+            "engine" => "liquid",
+            "messages" => [%{"role" => "user", "content" => "{{ question }}"}]
+          }
+        },
+        "models" => %{
+          "openrouter:openai/gpt-4o-mini" => %{
+            "provider" => "openrouter",
+            "model" => "openai/gpt-4o-mini",
+            "status" => "active"
+          }
+        }
+      }
 
-      assert {:error, {:unsupported_schema_version, 8}} = PromptDocument.decode(map)
+      assert {:ok, data, []} = PromptDocument.decode(map)
+      assert data.schema_version == 8
+      assert data.deployments["support_reply"].id == nil
+      assert data.deployments["support_reply"].model_id == "openrouter:openai/gpt-4o-mini"
+      assert data.deployments["support_reply"].template_pins == %{"default" => "support_reply@2"}
+      assert data.prompt_versions["support_reply@2"].id == "support_reply@2"
+      assert data.prompt_versions["support_reply@2"].prompt_template_id == "support_reply"
+      assert data.models["openrouter:openai/gpt-4o-mini"].model_id == "openai/gpt-4o-mini"
+    end
+
+    test "a newer version is refused" do
+      map = Map.put(Fixtures.snapshot(), "schema_version", 9)
+
+      assert {:error, {:unsupported_schema_version, 9}} = PromptDocument.decode(map)
     end
 
     test "schema_version is required even when `deployments` is present" do

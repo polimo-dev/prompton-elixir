@@ -12,17 +12,17 @@ track(prompt, meta, fn -> call the provider end) ─▶ log recorded asynchronou
 
 ## Installation
 
-Install the v0.6.0 GitHub source release:
+Install the v0.7.0 GitHub source release:
 
 ```elixir
 def deps do
-  [{:prompton_sdk, git: "https://github.com/polimo-dev/prompton-elixir.git", tag: "v0.6.0"}]
+  [{:prompton_sdk, git: "https://github.com/polimo-dev/prompton-elixir.git", tag: "v0.7.0"}]
 end
 ```
 
 ## Prepared provider requests
 
-SDK 0.6 reads schema v7 documents and returns the deployed API, origin-relative path and rendered
+SDK 0.7 reads schema v8 documents and returns the deployed API, origin-relative path and rendered
 body. Your app supplies the provider origin and credentials and sends the HTTP request:
 
 ```elixir
@@ -91,7 +91,7 @@ Supported explicit routes are OpenRouter Chat (`/api/v1/chat/completions`) and S
 API/type mismatches and invalid native questions return an error before a provider call. Legacy schema
 v5 documents remain readable by `messages/3` and `text/3`, but cannot prepare a request. Schema v6
 documents can still prepare requests without canonical tools. Upgrade the server and cached/bundled
-document to schema v7 when adopting editor-managed tool definitions.
+document to schema v8 when adopting editor-managed tool definitions and readable resource refs.
 
 Options include `template:`, shallow `params:` and `provider_options:` overrides. Chat omits nil
 parameter values; provider options preserve explicit nil as JSON null. Decisions accept only
@@ -287,18 +287,17 @@ streaming), `PromptOnSDK.feedback/1` (`%{log_id, kind, value, …}`),
 `PromptOnSDK.Result.from_openai/1`, `PromptOnSDK.Result.from_anthropic/1`, and
 `PromptOnSDK.Result.from_generic/1` for provider/application result normalization.
 
-## Prompt document v7 — a deployment is a pin, not a router
+## Prompt document v8 — a deployment is a pin, not a router
 
-The SDK reads **schema v7, schema v6 and legacy v5**; prepared requests require v6+ metadata. A deployment revision no longer routes: no rules, no conditions, no targets,
-no weights, no A/B, no context dimensions. One revision is **one model** plus **one pinned template version per
-template name**:
+The SDK reads **schema v8, schema v7, schema v6 and legacy v5**; prepared requests require v6+ metadata. A deployment revision no longer routes: no rules, no conditions, no targets,
+no weights, no A/B, no context dimensions. One revision is **one model** plus **one pinned prompt version**:
 
 ```json
 "deployments": {
   "support_reply": {
-    "id": "…", "revision": "v2026.09.30-7",
-    "model_id": "…", "params": {"temperature": 0.3}, "provider_options": {"only": ["OpenAI"]},
-    "template_pins": {"default": "<prompt version id>", "ko": "<prompt version id>"}
+    "revision": "v2026.09.30-7",
+    "provider": "openrouter", "model": "openai/gpt-4o-mini", "prompt_version": 3,
+    "params": {"temperature": 0.3}, "provider_options": {"only": ["OpenAI"]}
   }
 }
 ```

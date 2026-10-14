@@ -8,10 +8,68 @@ defmodule PromptOnSDK.ResolverTest do
 
   use ExUnit.Case, async: true
 
-  alias PromptOnSDK.{Fixtures, PromptDocument, Resolver}
+  alias PromptOnSDK.{Fixtures, Prompt, PromptDocument, Resolver}
 
   setup do
     %{snapshot: Fixtures.snapshot_data()}
+  end
+
+  defp readable_snapshot do
+    %{
+      "schema_version" => 8,
+      "project" => "helpdesk",
+      "environment" => "production",
+      "prompts" => %{
+        "support_reply" => %{"kind" => "chat", "default_params" => %{"max_tokens" => 512}},
+        "summary" => %{"kind" => "text", "default_params" => %{}},
+        "missing_refs" => %{"kind" => "chat", "default_params" => %{}}
+      },
+      "deployments" => %{
+        "support_reply" => %{
+          "revision" => "v2026.09.30-3",
+          "provider" => "openrouter",
+          "model" => "openai/gpt-4o-mini",
+          "prompt_version" => 2,
+          "params" => %{"temperature" => 0.3},
+          "provider_options" => %{"allow_fallbacks" => false}
+        },
+        "summary" => %{
+          "revision" => "v2026.09.30-4",
+          "provider" => "openrouter",
+          "model" => "openai/gpt-4o-mini",
+          "prompt_version" => 2
+        },
+        "missing_refs" => %{
+          "revision" => "v2026.09.30-5",
+          "provider" => "openrouter",
+          "model" => "openai/missing",
+          "prompt_version" => 3
+        }
+      },
+      "prompt_versions" => %{
+        "support_reply@2" => %{
+          "prompt" => "support_reply",
+          "number" => 2,
+          "kind" => "chat",
+          "engine" => "liquid",
+          "messages" => [%{"role" => "user", "content" => "{{ question }}"}]
+        },
+        "summary@2" => %{
+          "prompt" => "summary",
+          "number" => 2,
+          "kind" => "text",
+          "engine" => "liquid",
+          "text_template" => "Summary: {{ text }}"
+        }
+      },
+      "models" => %{
+        "openrouter:openai/gpt-4o-mini" => %{
+          "provider" => "openrouter",
+          "model" => "openai/gpt-4o-mini",
+          "provider_options" => %{"only" => ["OpenAI"]}
+        }
+      }
+    }
   end
 
   describe "prompt selection" do
@@ -62,6 +120,48 @@ defmodule PromptOnSDK.ResolverTest do
       assert {:ok, []} = Resolver.template_names(snapshot, "diary_embedding")
       assert {:ok, []} = Resolver.template_names(snapshot, "transcript_revision")
       assert {:error, :unknown_prompt} = Resolver.template_names(snapshot, "nope")
+    end
+  end
+
+  describe "schema v8 readable resources" do
+    test "resolves readable model and prompt-version keys with nil legacy ids" do
+      assert {:ok, snapshot, []} = PromptDocument.decode(readable_snapshot())
+      assert {:ok, r} = Resolver.resolve(snapshot, "support_reply", source: :bundle)
+
+      assert r.model == "openai/gpt-4o-mini"
+      assert r.provider == :openrouter
+      assert r.deployment_id == nil
+      assert r.model_id == nil
+      assert r.prompt_version_id == nil
+      assert r.prompt_version_number == 2
+      assert r.params == %{"max_tokens" => 512, "temperature" => 0.3}
+      assert r.provider_options == %{"only" => ["OpenAI"], "allow_fallbacks" => false}
+
+      prompt = Prompt.from_resolution(r)
+      assert prompt.prompt_version == %{id: nil, number: 2}
+      assert Prompt.to_resolution(prompt).prompt_version_number == 2
+    end
+
+    test "same version numbers are scoped by prompt key" do
+      assert {:ok, snapshot, []} = PromptDocument.decode(readable_snapshot())
+      assert {:ok, r} = Resolver.resolve(snapshot, "summary")
+
+      assert r.prompt_version_number == 2
+      assert r.text_template == "Summary: {{ text }}"
+      assert r.prompt_version_id == nil
+    end
+
+    test "missing readable refs warn with scoped lookup keys" do
+      assert {:ok, snapshot, []} = PromptDocument.decode(readable_snapshot())
+      assert {:ok, r} = Resolver.resolve(snapshot, "missing_refs")
+
+      assert r.warnings == [
+               {:missing_prompt_version, "missing_refs@3"},
+               {:missing_model, "openrouter:openai/missing"}
+             ]
+
+      assert r.prompt_version_number == nil
+      assert r.model == nil
     end
   end
 
