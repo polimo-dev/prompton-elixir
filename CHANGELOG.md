@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.6.0 - Unreleased
+## 0.6.0
 
 - Breaking request contract: monitoring logs now send readable prompt evidence only: `deployment_revision`,
   `template`, and `prompt_version_number`. `deployment_id`, `prompt_version_id`, and `model_id`
