@@ -1,8 +1,8 @@
 defmodule PromptOnSDK.PromptDocument do
   @moduledoc """
-  Decodes the `GET /prompts` response into the SDK's prompt document structure.
+  Decodes `GET /prompts` and `GET /prompts/:key` responses into the SDK's prompt document structure.
 
-  The SDK reads **schema v8, schema v7, schema v6, and legacy v5**. Prepared requests require v6+
+  The SDK reads **schema v9, schema v8, schema v7, schema v6, and legacy v5**. Prepared requests require v6+
   metadata. A document contains deployed prompts, their deployments,
   pinned template versions, and model records. The decoded value is consumed by
   `PromptOnSDK.prompt/2` and by test helpers.
@@ -11,7 +11,7 @@ defmodule PromptOnSDK.PromptDocument do
   expected to be JSON/string-keyed maps.
   """
 
-  @schema_version 8
+  @schema_version 9
   @kinds ~w(chat decision text embedding)
   @apis ~w(chat_completions decisions)
   @engines ~w(liquid raw)
@@ -122,6 +122,7 @@ defmodule PromptOnSDK.PromptDocument do
 
   def decode(map) when is_map(map) do
     with {:ok, version, warnings} <- schema_version(map),
+         {:ok, map} <- normalize_schema9_single_prompt(map, version),
          {:ok, prompts_raw} <- fetch_map(map, "prompts"),
          :ok <- validate_schema8_references(map, version) do
       {prompts, warnings} = decode_prompts(prompts_raw, warnings)
@@ -165,7 +166,7 @@ defmodule PromptOnSDK.PromptDocument do
 
   defp schema_version(map), do: check_schema_version(get(map, "schema_version"))
 
-  defp check_schema_version(version) when version in [5, 6, 7, @schema_version],
+  defp check_schema_version(version) when version in [5, 6, 7, 8, @schema_version],
     do: {:ok, version, []}
 
   defp check_schema_version(v) when is_integer(v) and v > 0,
@@ -280,7 +281,103 @@ defmodule PromptOnSDK.PromptDocument do
     do: {nil, [{:invalid_payload_policy, other} | warnings]}
 
   # ---------------------------------------------------------------------------
-  # schema v8 validation
+  # schema v9 single-prompt envelope
+
+  defp normalize_schema9_single_prompt(map, version) when version != 9, do: {:ok, map}
+
+  defp normalize_schema9_single_prompt(map, 9) do
+    with :ok <- reject_schema9_mixed_shape(map),
+         {:ok, prompt} <- required_object(map, "prompt"),
+         {:ok, deployment} <- required_object(map, "deployment"),
+         {:ok, prompt_version} <- required_object(map, "prompt_version"),
+         {:ok, model} <- required_object(map, "model"),
+         {:ok, key} <- required_string(get(prompt, "key"), "prompt.key"),
+         :ok <- validate_schema9_identity(key, deployment, prompt_version, model) do
+      normalized =
+        map
+        |> Map.delete("prompt")
+        |> Map.delete(:prompt)
+        |> Map.delete("deployment")
+        |> Map.delete(:deployment)
+        |> Map.delete("prompt_version")
+        |> Map.delete(:prompt_version)
+        |> Map.delete("model")
+        |> Map.delete(:model)
+        |> Map.put("prompts", %{key => prompt})
+        |> Map.put("deployments", %{key => deployment})
+        |> Map.put("prompt_versions", %{
+          "#{key}@#{get(prompt_version, "number")}" => prompt_version
+        })
+        |> Map.put("models", %{"#{get(model, "provider")}:#{get(model, "model")}" => model})
+
+      {:ok, normalized}
+    end
+  end
+
+  defp reject_schema9_mixed_shape(map) do
+    Enum.find_value(~w(prompts deployments prompt_versions models), :ok, fn key ->
+      if has_key?(map, key) do
+        {:error,
+         {:invalid_prompt_document, "schema 9 single prompt document must not include #{key}"}}
+      else
+        false
+      end
+    end)
+  end
+
+  defp validate_schema9_identity(key, deployment, prompt_version, model) do
+    with {:ok, version_prompt} <-
+           required_string(get(prompt_version, "prompt"), "prompt_version.prompt"),
+         :ok <-
+           require_equal_value(
+             version_prompt,
+             key,
+             "prompt_version.prompt #{version_prompt} must match prompt.key #{key}"
+           ),
+         {:ok, version_number} <-
+           strict_positive_integer(get(prompt_version, "number"), "prompt_version.number"),
+         {:ok, deployment_version} <-
+           strict_positive_integer(get(deployment, "prompt_version"), "deployment.prompt_version"),
+         :ok <-
+           require_equal_value(
+             deployment_version,
+             version_number,
+             "deployment.prompt_version #{deployment_version} must match prompt_version.number #{version_number}"
+           ),
+         {:ok, deployment_provider} <-
+           required_string(get(deployment, "provider"), "deployment.provider"),
+         {:ok, deployment_model} <- required_string(get(deployment, "model"), "deployment.model"),
+         {:ok, model_provider} <- required_string(get(model, "provider"), "model.provider"),
+         {:ok, model_name} <- required_string(get(model, "model"), "model.model"),
+         :ok <-
+           require_equal_value(
+             {deployment_provider, deployment_model},
+             {model_provider, model_name},
+             "deployment provider/model #{deployment_provider}:#{deployment_model} must match model #{model_provider}:#{model_name}"
+           ) do
+      :ok
+    end
+  end
+
+  defp required_object(map, key) do
+    case get(map, key) do
+      value when is_map(value) ->
+        {:ok, value}
+
+      nil ->
+        {:error, {:invalid_prompt_document, "#{key} is required"}}
+
+      other ->
+        {:error, {:invalid_prompt_document, "#{key} must be an object, got: #{inspect(other)}"}}
+    end
+  end
+
+  defp require_equal_value(value, value, _message), do: :ok
+
+  defp require_equal_value(_left, _right, message),
+    do: {:error, {:invalid_prompt_document, message}}
+
+  # schema v8/v9 validation
 
   defp validate_schema8_references(_map, version) when version < 8, do: :ok
 
@@ -667,6 +764,10 @@ defmodule PromptOnSDK.PromptDocument do
   end
 
   defp get(_, _), do: nil
+
+  defp has_key?(map, key) when is_map(map) and is_binary(key) do
+    Map.has_key?(map, key) or Map.has_key?(map, @atom_key_lookup[key])
+  end
 
   defp to_str(nil), do: nil
   defp to_str(v) when is_binary(v), do: v

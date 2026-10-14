@@ -82,6 +82,77 @@ defmodule PromptOnSDK.SnapshotTest do
     }
   end
 
+  defp readable_single_snapshot do
+    %{
+      "schema_version" => 9,
+      "project" => "heydiary",
+      "environment" => "production",
+      "prompt" => %{
+        "key" => "diary_generation",
+        "kind" => "chat",
+        "input_schema" => [],
+        "default_params" => %{"temperature" => 0.5}
+      },
+      "deployment" => %{
+        "revision" => "v2026.09.30-4",
+        "provider" => "openrouter",
+        "model" => "anthropic/claude-sonnet-4",
+        "prompt_version" => 2,
+        "params" => %{"temperature" => 0.4},
+        "api" => "chat_completions",
+        "request_path" => "/api/v1/chat/completions"
+      },
+      "prompt_version" => %{
+        "prompt" => "diary_generation",
+        "number" => 2,
+        "kind" => "chat",
+        "engine" => "liquid",
+        "messages" => [%{"role" => "user", "content" => "Hi {{ name }}"}]
+      },
+      "model" => %{
+        "provider" => "openrouter",
+        "model" => "anthropic/claude-sonnet-4"
+      }
+    }
+  end
+
+  defp decision_single_snapshot_json(request_path \\ "/api/v1/systemone") do
+    Jason.encode!(%{
+      "schema_version" => 9,
+      "project" => "heydiary",
+      "environment" => "production",
+      "prompt" => %{"key" => "route", "kind" => "decision"},
+      "deployment" => %{
+        "revision" => "v2026.09.30-2",
+        "provider" => "openrouter",
+        "model" => "typesafe/jev-1.13",
+        "prompt_version" => 3,
+        "api" => "decisions",
+        "request_path" => request_path
+      },
+      "prompt_version" => %{
+        "prompt" => "route",
+        "kind" => "decision",
+        "number" => 3,
+        "engine" => "liquid",
+        "decision" => %{
+          "state" => %{"message" => "{{ input }}"},
+          "questions" => %{
+            "route" => %{
+              "type" => "choice",
+              "instructions" => "Route {{ team }}",
+              "criteria" => %{"support" => nil}
+            }
+          }
+        }
+      },
+      "model" => %{
+        "provider" => "openrouter",
+        "model" => "typesafe/jev-1.13"
+      }
+    })
+  end
+
   defp shared_model_json(key, model_name) do
     Jason.encode!(%{
       "schema_version" => 7,
@@ -728,6 +799,44 @@ defmodule PromptOnSDK.SnapshotTest do
                PromptOnSDK.prompt("diary_generation")
     end
 
+    test "schema v9 per-key fetch persists original bytes across export and disk restart" do
+      path = tmp_path("cache-v9-raw.json")
+      body = Jason.encode!(readable_single_snapshot(), pretty: true)
+
+      FakeClient.set(:fetch_prompt, fn "diary_generation", nil, _opts ->
+        ok_200(body, ~s("raw-v9"))
+      end)
+
+      start_sdk(disk_cache: path)
+
+      assert {:ok, %{model: "anthropic/claude-sonnet-4", etag: ~s("raw-v9")}} =
+               PromptOnSDK.prompt("diary_generation")
+
+      wait_until(fn ->
+        with {:ok, cached} <- File.read(path),
+             true <- cached == body,
+             meta when is_map(meta) <- Store.read_meta(path) do
+          get_in(meta, ["prompt_bodies", "diary_generation"]) == body and
+            not is_map(meta["prompt_documents"])
+        else
+          _ -> false
+        end
+      end)
+
+      assert File.read!(path) == body
+
+      stop_supervised!(PromptOnSDK)
+      Store.erase()
+      PromptOnSDK.Config.erase()
+      FakeClient.reset()
+
+      start_sdk(mode: :offline, api_key: nil, disk_cache: path)
+
+      assert {:ok, prompt} = PromptOnSDK.prompt("diary_generation")
+      assert prompt.source == :disk
+      assert {:ok, [%{content: "Hi Ada"}]} = PromptOnSDK.messages(prompt, %{name: "Ada"})
+    end
+
     test "successful per-key remote configs persist to disk and survive restart independently" do
       path = tmp_path("cache.json")
 
@@ -773,6 +882,22 @@ defmodule PromptOnSDK.SnapshotTest do
     test "remote v6 Decision snapshots prepare System One requests" do
       FakeClient.set(:fetch_prompt, fn "route", nil, _opts ->
         ok_200(decision_snapshot_json(), ~s("decision-v6"))
+      end)
+
+      start_sdk()
+
+      assert {:ok, prompt} = PromptOnSDK.prompt("route")
+
+      assert {:ok, %{api: :decisions, path: "/api/v1/systemone", body: request_body}} =
+               PromptOnSDK.request(prompt, %{input: "hello", team: "Support"})
+
+      assert request_body["state"] == %{"message" => "hello"}
+      assert get_in(request_body, ["questions", "route", "instructions"]) == "Route Support"
+    end
+
+    test "remote v9 Decision snapshots prepare System One requests" do
+      FakeClient.set(:fetch_prompt, fn "route", nil, _opts ->
+        ok_200(decision_single_snapshot_json(), ~s("decision-v9"))
       end)
 
       start_sdk()

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.1
+
+- Read schema v9 single-prompt responses from `GET /prompts/:key`, where `prompt`,
+  `deployment`, `prompt_version`, and `model` are singular objects instead of one-entry maps.
+- Keep bulk prompt documents and exported bundles on schema v8, and preserve the original schema v9
+  response bytes, ETag, and per-prompt disk cache for restart fallback.
+- Validate schema v9 resource identity before normalization: `prompt.key`, `prompt_version.prompt`,
+  `deployment.prompt_version`, and deployment/model provider keys must agree.
+
 ## 0.7.0
 
 - Read schema v8 prompt documents with public readable resource references:

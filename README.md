@@ -12,17 +12,17 @@ track(prompt, meta, fn -> call the provider end) ─▶ log recorded asynchronou
 
 ## Installation
 
-Install the v0.7.0 GitHub source release:
+Install the v0.7.1 GitHub source release:
 
 ```elixir
 def deps do
-  [{:prompton_sdk, git: "https://github.com/polimo-dev/prompton-elixir.git", tag: "v0.7.0"}]
+  [{:prompton_sdk, git: "https://github.com/polimo-dev/prompton-elixir.git", tag: "v0.7.1"}]
 end
 ```
 
 ## Prepared provider requests
 
-SDK 0.7 reads schema v8 documents and returns the deployed API, origin-relative path and rendered
+SDK 0.7 reads schema v8 bulk documents and schema v9 single-prompt responses, then returns the deployed API, origin-relative path and rendered
 body. Your app supplies the provider origin and credentials and sends the HTTP request:
 
 ```elixir
@@ -287,9 +287,9 @@ streaming), `PromptOnSDK.feedback/1` (`%{log_id, kind, value, …}`),
 `PromptOnSDK.Result.from_openai/1`, `PromptOnSDK.Result.from_anthropic/1`, and
 `PromptOnSDK.Result.from_generic/1` for provider/application result normalization.
 
-## Prompt document v8 — a deployment is a pin, not a router
+## Prompt documents — a deployment is a pin, not a router
 
-The SDK reads **schema v8, schema v7, schema v6 and legacy v5**; prepared requests require v6+ metadata. A deployment revision no longer routes: no rules, no conditions, no targets,
+The SDK reads **schema v9 single-prompt responses, schema v8 bulk documents, schema v7, schema v6 and legacy v5**; prepared requests require v6+ metadata. A deployment revision no longer routes: no rules, no conditions, no targets,
 no weights, no A/B, no context dimensions. One revision is **one model** plus **one pinned prompt version**:
 
 ```json
@@ -302,7 +302,7 @@ no weights, no A/B, no context dimensions. One revision is **one model** plus **
 }
 ```
 
-For schema v8, request-time selection is the prompt key and variables; the deployment pins the single default prompt version:
+For schema v8 and v9, request-time selection is the prompt key and variables; the deployment pins the single default prompt version:
 
 ```elixir
 {:ok, r} = PromptOnSDK.prompt("support_reply")

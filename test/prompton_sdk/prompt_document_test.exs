@@ -145,6 +145,86 @@ defmodule PromptOnSDK.PromptDocumentTest do
       assert data.models["openrouter:openai/gpt-4o-mini"].model_id == "openai/gpt-4o-mini"
     end
 
+    test "schema v9 single prompt envelope decodes through the normal document view" do
+      map = %{
+        "schema_version" => 9,
+        "project" => "helpdesk",
+        "environment" => "production",
+        "prompt" => %{
+          "key" => "support_reply",
+          "kind" => "chat",
+          "default_params" => %{"temperature" => 0.5}
+        },
+        "deployment" => %{
+          "revision" => "v2026.09.30-3",
+          "provider" => "openrouter",
+          "model" => "openai/gpt-4o-mini",
+          "prompt_version" => 2,
+          "params" => %{"temperature" => 0.3}
+        },
+        "prompt_version" => %{
+          "prompt" => "support_reply",
+          "number" => 2,
+          "kind" => "chat",
+          "engine" => "liquid",
+          "messages" => [%{"role" => "user", "content" => "{{ question }}"}]
+        },
+        "model" => %{
+          "provider" => "openrouter",
+          "model" => "openai/gpt-4o-mini",
+          "status" => "active"
+        }
+      }
+
+      assert {:ok, data, []} = PromptDocument.decode(map)
+      assert data.schema_version == 9
+      assert data.prompts["support_reply"].key == "support_reply"
+      assert data.deployments["support_reply"].model_id == "openrouter:openai/gpt-4o-mini"
+      assert data.deployments["support_reply"].template_pins == %{"default" => "support_reply@2"}
+      assert data.prompt_versions["support_reply@2"].prompt_template_id == "support_reply"
+      assert data.models["openrouter:openai/gpt-4o-mini"].model_id == "openai/gpt-4o-mini"
+    end
+
+    test "schema v9 single prompt envelope rejects mixed and mismatched identities" do
+      map = %{
+        "schema_version" => 9,
+        "prompt" => %{"key" => "support_reply", "kind" => "chat"},
+        "deployment" => %{
+          "provider" => "openrouter",
+          "model" => "openai/gpt-4o-mini",
+          "prompt_version" => 2
+        },
+        "prompt_version" => %{
+          "prompt" => "support_reply",
+          "number" => 2,
+          "kind" => "chat"
+        },
+        "model" => %{"provider" => "openrouter", "model" => "openai/gpt-4o-mini"}
+      }
+
+      assert {:ok, _data, []} = PromptDocument.decode(map)
+
+      mixed = Map.put(map, "prompts", %{})
+      assert {:error, {:invalid_prompt_document, message}} = PromptDocument.decode(mixed)
+      assert message =~ "must not include prompts"
+
+      mixed_null = Map.put(map, "prompts", nil)
+      assert {:error, {:invalid_prompt_document, message}} = PromptDocument.decode(mixed_null)
+      assert message =~ "must not include prompts"
+
+      bad_prompt = put_in(map, ["prompt_version", "prompt"], "other")
+      assert {:error, {:invalid_prompt_document, message}} = PromptDocument.decode(bad_prompt)
+      assert message =~ "prompt_version.prompt other"
+
+      bad_version = put_in(map, ["deployment", "prompt_version"], 3)
+      assert {:error, {:invalid_prompt_document, message}} = PromptDocument.decode(bad_version)
+      assert message =~ "deployment.prompt_version 3"
+
+      bad_model = put_in(map, ["deployment", "model"], "openai/missing")
+      assert {:error, {:invalid_prompt_document, message}} = PromptDocument.decode(bad_model)
+      assert message =~ "must match model"
+    end
+
     test "schema v8 requires strict readable resource references" do
       map = %{
         "schema_version" => 8,
@@ -208,9 +288,9 @@ defmodule PromptOnSDK.PromptDocumentTest do
     end
 
     test "a newer version is refused" do
-      map = Map.put(Fixtures.snapshot(), "schema_version", 9)
+      map = Map.put(Fixtures.snapshot(), "schema_version", 10)
 
-      assert {:error, {:unsupported_schema_version, 9}} = PromptDocument.decode(map)
+      assert {:error, {:unsupported_schema_version, 10}} = PromptDocument.decode(map)
     end
 
     test "schema_version is required even when `deployments` is present" do
